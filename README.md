@@ -19,9 +19,9 @@ widescreen, vídeos, som, saves, teclado e controle. Feito por recompilação es
 2. **Abra o `Ben 10 Recomp Launcher.exe`.** Na primeira vez ele procura a sua ISO no PC sozinho (Downloads, Área de
    Trabalho, Documentos e os discos) e confere se é a versão certa. Se não achar, é só clicar em **Procurar…** ou
    arrastar o arquivo para a janela.
-3. **Próximo: montar o jogo.** O launcher instala as ferramentas de C++ gratuitas da Microsoft, se faltarem (o Windows
-   pede permissão uma vez), e monta o jogo no seu PC. **Isso leva de 30 a 60 minutos, uma vez só**, e precisa de
-   internet. Você pode usar o PC enquanto isso.
+3. **Próximo: montar o jogo.** O launcher baixa da Microsoft o compilador de C++ gratuito (uns 500 MB, dentro da
+   pasta do jogo, sem instalar nada no Windows nem pedir administrador) e monta o jogo no seu PC. **Isso leva de 30 a
+   60 minutos, uma vez só**, e precisa de internet. Você pode usar o PC enquanto isso.
 4. **JOGAR.** Depois disso o jogo abre na hora, pelo launcher ou pelo atalho **Ben 10 Recomp**.
 
 <p align="center">
@@ -40,7 +40,7 @@ widescreen, vídeos, som, saves, teclado e controle. Feito por recompilação es
 | Sistema | Windows 10 ou 11, 64 bits |
 | Placa de vídeo | Com Vulkan e driver atualizado (testado numa GeForce GTX 1650) |
 | Espaço | Uns 15 GB |
-| Internet | Na primeira montagem (ferramentas da Microsoft e bibliotecas) |
+| Internet | Na primeira montagem (o compilador da Microsoft, uns 500 MB) |
 | Jogo | ISO de Ben 10: Protector of Earth, EUA, versão 1.01 (tabela abaixo) |
 
 | Disco suportado | |
@@ -80,7 +80,8 @@ widescreen, vídeos, som, saves, teclado e controle. Feito por recompilação es
 Ben 10: Protector of Earth (PS2, USA v1.01) as a native Windows program, built on your PC from **your own disc**: no
 game files come with this project. [Download the zip](https://github.com/guilhermeperecim-jpg/ben10-protector-of-earth-pc/releases/latest/download/Ben10-Recomp-Windows.zip),
 unzip it somewhere short, open **Ben 10 Recomp Launcher.exe**: it finds your .iso by itself, checks it, and builds the
-game once (30-60 minutes, Microsoft's free C++ build tools are installed if missing). Then press **PLAY**. The launcher
+game once (30-60 minutes; Microsoft's free C++ compiler is downloaded into the game's folder, no installer, no
+administrator). Then press **PLAY**. The launcher
 speaks English and Portuguese (Options › Launcher › Language).
 
 ## Andamento

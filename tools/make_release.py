@@ -61,9 +61,9 @@ Para jogar:
   2. Abra "Ben 10 Recomp Launcher.exe".
   3. Ele procura o seu disco no PC sozinho (um .iso da versão americana 1.01, SLUS-21661) e confere. Se não
      achar, clique em "Procurar..." ou arraste o arquivo para a janela.
-  4. Aperte "Próximo: montar o jogo". Se as ferramentas de C++ gratuitas da Microsoft não estiverem no PC, elas são
-     instaladas antes (permita o aviso do Windows uma vez). A primeira montagem leva de 30 a 60 minutos (precisa de
-     internet uma vez).
+  4. Aperte "Próximo: montar o jogo". O compilador de C++ gratuito da Microsoft é baixado para dentro desta pasta
+     (uns 500 MB, sem instalar nada no Windows). A primeira montagem leva de 30 a 60 minutos (precisa de internet
+     uma vez).
   5. Aperte JOGAR. O atalho "Ben 10 Recomp" nesta pasta abre o jogo direto.
 
 Se o Windows disser "O Windows protegeu o computador": clique em "Mais informações" e depois em "Executar assim mesmo"
@@ -78,8 +78,8 @@ To play:
   2. Open "Ben 10 Recomp Launcher.exe".
   3. It looks for your disc on this PC by itself (an .iso of the USA disc, version 1.01, SLUS-21661) and checks it.
      If it can't find it, click "Browse..." or drop the file onto the window.
-  4. Press "Next: build the game". If Microsoft's free C++ build tools aren't on this PC, they are installed first
-     (allow Windows' prompt once). The first build takes 30 to 60 minutes (it needs the internet once).
+  4. Press "Next: build the game". Microsoft's free C++ compiler is downloaded into this folder (about 500 MB,
+     nothing installed in Windows). The first build takes 30 to 60 minutes (it needs the internet once).
   5. Press PLAY. The "Ben 10 Recomp" shortcut in this folder starts the game straight away.
 
 If Windows says "Windows protected your PC": click "More info", then "Run anyway" (the program isn't signed with a

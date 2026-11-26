@@ -250,10 +250,37 @@ def update_build_tools(install, why):
                   'adding what the build needs to them')
 
 
-def step_tools():
+def portable_tools(data):
+    """Microsoft's compiler, the Windows SDK, CMake and Ninja in files\\tools\\ (tools/portable_msvc.py): ~1 GB, no
+    installer, no administrator. The environment, or None (and why) when it can't be had."""
+    sys.path.insert(0, os.path.join(SRC, 'tools'))
+    import portable_msvc
+    try:
+        env = portable_msvc.get(os.path.join(data, 'tools'))
+    except Exception as error:  # no connection, a list Microsoft changed, ...: the installer instead
+        say(f'[tools] the portable C++ tools could not be had ({type(error).__name__}: {error})')
+        return None
+    problem = tools_problem(env)
+    if problem:
+        say(f'[tools] the portable C++ tools: {problem}')
+        return None
+    return env
+
+
+def step_tools(data, portable_only=False):
     step(2, STEPS[1])
-    found = find_install()
+    # 1. a Visual Studio or Build Tools already on this PC, when it is good enough
+    found = None if portable_only else find_install()
     env = build_environment(found['vcvars']) if found else None
+    if env is not None and tools_problem(env) is None:
+        return report_tools(env, found['vcvars'])
+    # 2. the portable tools in the install folder (downloaded once)
+    portable = portable_tools(data)
+    if portable is not None or portable_only:
+        if portable is None:
+            raise SetupError("the portable C++ tools could not be had (see the lines above)")
+        return report_tools(portable, os.path.join(data, 'tools'))
+    # 3. Microsoft's installer, as before
     problem = tools_problem(env)
     if problem:
         say(f'[tools] {problem}' + (f" ({found['path']}, {found['version']})" if found else ''))
@@ -269,8 +296,12 @@ def step_tools():
             raise SetupError(problem + ' after Microsoft\'s installer. Open the Visual Studio Installer, update '
                              '"Build Tools 2022" and tick "Desktop development with C++" (with its Windows 11 SDK), '
                              'then run the setup again')
+    return report_tools(env, found['vcvars'])
+
+
+def report_tools(env, where):
     version = '.'.join(map(str, compiler_version(env)))
-    say(f"build tools: {found['vcvars']} (the compiler {version}, the Windows SDK {env.get('WindowsSDKVersion', '').strip(chr(92))})")
+    say(f"build tools: {where} (the compiler {version}, the Windows SDK {env.get('WindowsSDKVersion', '').strip(chr(92))})")
     progress(1.0)
     return env
 
@@ -293,7 +324,7 @@ def step_disc(data, disc):
         m = re.match(r'(\d+)/(\d+) sectors', line)
         if m:
             progress(0.9 * int(m.group(1)) / max(1, int(m.group(2))))
-    run([sys.executable, '-I', os.path.join(SRC, 'tools', 'prepare_disc.py'), disc], env=env, parse=parse)
+    run([sys.executable, '-I', '-X', 'utf8', os.path.join(SRC, 'tools', 'prepare_disc.py'), disc], env=env, parse=parse)
     if not os.path.isfile(elf):
         raise SetupError('the disc was read but SLUS_216.61 is missing')
     progress(1.0)
@@ -402,9 +433,35 @@ def cached_compiler(build):
     return None
 
 
+def cached_folder(build):
+    """Where a build folder was when CMake set it up (CMakeCache.txt's CMAKE_CACHEFILE_DIR), or None."""
+    try:
+        with open(os.path.join(build, 'CMakeCache.txt'), encoding='utf-8', errors='replace') as f:
+            for line in f:
+                m = re.match(r'CMAKE_CACHEFILE_DIR:[A-Z]+=(.+)', line.strip())
+                if m:
+                    return m.group(1).strip()
+    except OSError:
+        pass
+    return None
+
+
+def empty_build(build, why):
+    say(f'{os.path.basename(build)}: {why}: building it afresh')
+    shutil.rmtree(build, ignore_errors=True)
+    if os.path.exists(os.path.join(build, 'CMakeCache.txt')):
+        raise SetupError(f'the old build folder {build} could not be removed (a program may be using it). Close the '
+                         'game and the launcher\'s other windows, delete that folder, then run the setup again')
+
+
 def fresh_if_compiler_changed(build, env):
-    """A build folder configured with a compiler that is gone or isn't the one the build tools give now: emptied, so
-    CMake configures it afresh (it never looks for the compiler again once it has written one down)."""
+    """A build folder configured with a compiler that is gone or isn't the one the build tools give now, or made in
+    another place (the install folder was moved: CMake refuses a cache from elsewhere), is emptied, so CMake configures
+    it afresh."""
+    where = cached_folder(build)
+    if where and os.path.normcase(os.path.normpath(where)) != os.path.normcase(os.path.normpath(build)):
+        empty_build(build, f'it was set up in {where} (the folder was moved)')
+        return
     old = cached_compiler(build)
     if not old:
         return
@@ -413,18 +470,14 @@ def fresh_if_compiler_changed(build, env):
     if same and os.path.isfile(old):
         return
     why = 'is gone' if not os.path.isfile(old) else f'is not the one in use now ({now})'
-    say(f'{os.path.basename(build)}: it was set up with the compiler {old}, which {why}: building it afresh')
-    shutil.rmtree(build, ignore_errors=True)
-    if os.path.exists(os.path.join(build, 'CMakeCache.txt')):
-        raise SetupError(f'the old build folder {build} could not be removed (a program may be using it). Close the '
-                         'game and the settings program\'s other windows, delete that folder, then run the setup again')
+    empty_build(build, f'it was set up with the compiler {old}, which {why}')
 
 
 def step_recompiler(env, data, arch):
     step(3, STEPS[2])
     build = os.path.join(data, 'build', 'recomp')
     fresh_if_compiler_changed(build, env)
-    run(['cmake', '-S', PS2RECOMP, '-B', build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DPS2X_BUILD_RUNTIME=OFF',
+    run(['cmake', '-S', PS2RECOMP, '-B', build, '-G', 'Ninja', '-DCMAKE_TRY_COMPILE_CONFIGURATION=Release', '-DCMAKE_BUILD_TYPE=Release', '-DPS2X_BUILD_RUNTIME=OFF',
          '-DPS2X_BUILD_TEST=OFF', '-DPS2X_BUILD_STUDIO=OFF', '-DPS2X_BUILD_ANALYZER=OFF',
          f'-DPS2X_MSVC_ARCH={arch}'] + deps_args(), env=env)
     progress(0.1)
@@ -452,7 +505,7 @@ def step_recompile(recompiler, data):
     logs = os.path.join(data, 'logs')
     os.makedirs(logs, exist_ok=True)
     # where the time goes (an update, 2026-10-12): the recompiler ~0.5 min, the file comparison ~6 min
-    run([sys.executable, '-I', os.path.join(SRC, 'tools', 'make_config.py')], env=env, cwd=SRC)
+    run([sys.executable, '-I', '-X', 'utf8', os.path.join(SRC, 'tools', 'make_config.py')], env=env, cwd=SRC)
     progress(0.02)
     say("Turning the game's code into C++")
     log = os.path.join(logs, 'recomp.log')
@@ -463,9 +516,9 @@ def step_recompile(recompiler, data):
     if code != 0:
         raise SetupError(f'the recompiler failed (exit code {code}); see {log}' + exit_meaning(code))
     progress(0.15)
-    run([sys.executable, '-I', os.path.join(SRC, 'tools', 'vu1_recomp.py')], env=env, cwd=SRC)
+    run([sys.executable, '-I', '-X', 'utf8', os.path.join(SRC, 'tools', 'vu1_recomp.py')], env=env, cwd=SRC)
     progress(0.18)
-    run([sys.executable, '-I', os.path.join(SRC, 'tools', 'sync_generated.py')], env=env, cwd=SRC,
+    run([sys.executable, '-I', '-X', 'utf8', os.path.join(SRC, 'tools', 'sync_generated.py')], env=env, cwd=SRC,
         parse=sync_progress(0.18, 1.0))
     progress(1.0)
 
@@ -476,7 +529,7 @@ def step_game(env, data, arch):
     fresh_if_compiler_changed(build, env)
     # the same build as tools/build.ps1, for this PC's processor
     cxx_flags = '/O2 /Ob1 /DNDEBUG' + (f' /arch:{arch}' if arch else '')
-    run(['cmake', '-S', PS2RECOMP, '-B', build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
+    run(['cmake', '-S', PS2RECOMP, '-B', build, '-G', 'Ninja', '-DCMAKE_TRY_COMPILE_CONFIGURATION=Release', '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
          f'-DCMAKE_CXX_FLAGS_RELWITHDEBINFO={cxx_flags}', '-DCMAKE_C_FLAGS_RELWITHDEBINFO=/O2 /DNDEBUG',
          f'-DPS2X_MSVC_ARCH={arch}',
          '-DCMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO=/INCREMENTAL:NO /DEBUG /OPT:REF /OPT:ICF /STACK:268435456',
@@ -529,7 +582,18 @@ def mark_changed_files(data, after_copy):
         say(f'{marked} files changed since the game was last built: marked as changed')
 
 
-def install_game(out_dir, data):
+def crt_dlls(env):
+    """The C++ runtime's DLLs (vcruntime140, msvcp140, ...) from the build tools' redistributable folder."""
+    redist = env.get('VCToolsRedistDir', '')
+    if not redist:
+        return []
+    for root, dirs, files in os.walk(os.path.join(redist, 'x64')):
+        if os.path.basename(root).lower().endswith('.crt') and 'debug' not in root.lower():
+            return [os.path.join(root, f) for f in files if f.lower().endswith('.dll')]
+    return []
+
+
+def install_game(out_dir, data, env):
     """The built game program and its DLLs put in their place beside the game files."""
     exe = os.path.join(out_dir, 'ps2EntryRunner.exe')
     if not os.path.isfile(exe):
@@ -537,6 +601,9 @@ def install_game(out_dir, data):
     # each copied beside its place first, then swapped in: an update's rebuild replaces the game only once it is all here
     files = [(exe, GAME_EXE)] + [(os.path.join(out_dir, name), name) for name in os.listdir(out_dir)
                                   if name.lower().endswith('.dll')]  # the DLLs it needs (ffmpeg)
+    files += [(dll, os.path.basename(dll)) for dll in crt_dlls(env)]
+    if not crt_dlls(env):
+        say('the C++ runtime DLLs were not found in the build tools: the game needs the Visual C++ Redistributable')
     for source, name in files:
         shutil.copyfile(source, os.path.join(data, name + '.new'))
     for _, name in files:
@@ -581,23 +648,27 @@ def step_finish(data):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding='utf-8', errors='replace')
     parser = argparse.ArgumentParser(description='First-run setup: your disc -> Ben 10 Recomp.exe')
     parser.add_argument('--data', required=True, help='the install folder (disc/, game/, the game program, build/)')
     parser.add_argument('--disc', help='your disc: .iso (USA, SLUS-21661 v1.01)')
     parser.add_argument('--after-copy', action='store_true',
                         help="a release's files were copied in by hand: with no record of the last build, build afresh")
+    parser.add_argument('--portable-tools', action='store_true',
+                        help='always the portable C++ tools (tests: a Visual Studio on this PC is not used)')
     args = parser.parse_args()
     data = os.path.abspath(args.data)
     try:
         step_disc(data, args.disc)
         mark_changed_files(data, args.after_copy)
-        env = step_tools()
+        env = step_tools(data, portable_only=args.portable_tools)
         fix_future_dates(SRC)
         arch = processor_arch()
         recompiler = step_recompiler(env, data, arch)
         step_recompile(recompiler, data)
         out_dir = step_game(env, data, arch)
-        install_game(out_dir, data)
+        install_game(out_dir, data, env)
         step_graphics(data)
         step_finish(data)
     except SetupError as error:

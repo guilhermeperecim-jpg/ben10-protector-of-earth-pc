@@ -77,8 +77,11 @@ FFmpeg (the game's movies), the LGPL build from https://github.com/System233/ffm
   Its DLLs come with the libraries that build uses (SDL2, zlib, libwebp, libjxl, brotli, FreeType, HarfBuzz,
   OpenEXR / Imath), each under its own licence.
 
-Microsoft C++ Build Tools (installed by the first-run setup when missing) - Microsoft's own licence terms, accepted in
-  Microsoft's installer - https://visualstudio.microsoft.com/visual-cpp-build-tools/
+Microsoft C++ compiler and Windows SDK (downloaded by the first-run setup from Microsoft into files\tools\, or a
+  Visual Studio already on the PC) - Microsoft's own licence terms - https://aka.ms/vs/17/release/license
+  The C++ runtime's DLLs put beside the game (vcruntime140, msvcp140, ...) are Microsoft's redistributable files.
+CMake (downloaded by the first-run setup) - Copyright Kitware, Inc. and contributors - BSD 3-Clause - https://cmake.org
+Ninja (downloaded by the first-run setup) - Copyright Google Inc. - Apache-2.0 - https://ninja-build.org
 
 
 Ben 10 Recomp Launcher (launcher\)

@@ -55,8 +55,12 @@ public static class SetupOutput
             return L.F("Building: part {0} of {1}", m.Groups[1].Value, m.Groups[2].Value);
         if (line.StartsWith("checked ") && line.Contains(" of "))
             return L.F("Checking which files changed: {0} files", line[8..]);
-        if (line == "Turning the game's code into C++")
+        if (line == "Turning the game's code into C++" || line == "Unpacking the Windows SDK" ||
+            line == "Reading Microsoft's list of the C++ tools")
             return L.T(line);
+        // the portable C++ tools (tools/portable_msvc.py): "Getting the C++ tools: N of T MB"
+        if (line.StartsWith("Getting the C++ tools: "))
+            return L.F("Getting the C++ tools: {0}", line["Getting the C++ tools: ".Length..]);
         if (line.StartsWith("Microsoft's C++ build tools are missing"))
             return line;
         // the build tools too old or without the Windows SDK: why Microsoft's installer runs ("<why>: downloading
@@ -112,10 +116,10 @@ public partial class SetupViewModel : ObservableObject
         Steps = new ObservableCollection<SetupStep>
         {
             new(L.T("Reading your disc"), 0.03, L.T("about 1 min")),
-            new(L.T("Getting the build tools"), 0.03, L.T("only if they're missing")),
+            new(L.T("Getting the build tools"), 0.08, L.T("about 1 GB, only if missing")),
             new(L.T("Building the recompiler"), 0.05, L.T("about 3 min")),
             new(L.T("Turning the game's code into C++"), 0.06, L.T("about 2 min")),
-            new(L.T("Building the game"), 0.78, L.T("about 30-60 min")),
+            new(L.T("Building the game"), 0.73, L.T("about 30-60 min")),
             new(L.T("Preparing graphics for your PC"), 0.04, L.T("about 2 min")),
             new(L.T("Finishing"), 0.01, ""),
         };
@@ -154,12 +158,20 @@ public partial class SetupViewModel : ObservableObject
     public bool ShowDiscOk => DiscOk && !Checking;
     public bool ShowDiscBad => DiscProblem.Length > 0 && !Checking;
     // a disc read in an earlier attempt (game\ is there) needs no new one
-    public bool CanBuild => !Checking && !FolderTooLong && (DiscOk || (DiscPath == null && _folder.HasGame));
+    public bool CanBuild => !Checking && !FolderTooLong && !FolderInOneDrive && (DiscOk || (DiscPath == null && _folder.HasGame));
 
     // The build's deepest files lie ~140 characters below this folder, and the compiler can't write past Windows'
     // 260-character path limit ("cannot open program database"): a folder deep inside others has to move first.
     public const int MaxFolderLength = 100;
     public bool FolderTooLong => _folder.Root.Length > MaxFolderLength;
+    // OneDrive would upload the build's ~10 GB while it is made, and holds files the compiler is writing: the setup
+    // stops halfway. Desktops and Documents are often inside OneDrive without the player knowing.
+    public bool FolderInOneDrive =>
+        new[] { "OneDrive", "OneDriveConsumer", "OneDriveCommercial" }
+            .Select(Environment.GetEnvironmentVariable)
+            .Any(d => !string.IsNullOrEmpty(d) &&
+                      _folder.Root.StartsWith(d.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase)) ||
+        _folder.Root.Contains(@"\OneDrive\", StringComparison.OrdinalIgnoreCase);
     public bool DiscAlreadyRead => DiscPath == null && _folder.HasGame;
     public string FolderPath => _sample ? @"C:\Jogos\Ben 10 Recomp" : _folder.Root;
     private bool _sample; // the README's pictures (--shot setup-found): no folder of this PC shown

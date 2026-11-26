@@ -93,6 +93,11 @@
                         </Grid>
                         <TextBlock Classes="hint" Margin="0,8,0,0"
                                    Text="{l:T 'Want it somewhere else? Close this, move the folder, open it again.'}" />
+                        <StackPanel Margin="0,10,0,0" Spacing="2" IsVisible="{Binding FolderInOneDrive}">
+                            <TextBlock Text="{l:T 'This folder is inside OneDrive'}" FontWeight="SemiBold" Classes="bad" />
+                            <TextBlock Classes="hint" TextWrapping="Wrap"
+                                       Text="{l:T 'OneDrive would upload the build while it is made, and that stops it halfway. Close this, move the folder outside OneDrive, such as C:\\Games, and open it again.'}" />
+                        </StackPanel>
                         <StackPanel Margin="0,10,0,0" Spacing="2" IsVisible="{Binding FolderTooLong}">
                             <TextBlock Text="{l:T 'This folder is too deep inside other folders'}" FontWeight="SemiBold" Classes="bad" />
                             <TextBlock Classes="hint" TextWrapping="Wrap"

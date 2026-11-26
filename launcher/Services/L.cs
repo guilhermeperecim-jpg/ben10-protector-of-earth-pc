@@ -165,6 +165,10 @@ public static class L
         ["Next: build the game"] = "Próximo: montar o jogo",
         ["YOUR DISC"] = "SEU DISCO",
         ["Search this PC"] = "Procurar no PC",
+        ["Unpacking the Windows SDK"] = "Descompactando o Windows SDK",
+        ["Reading Microsoft's list of the C++ tools"] = "Lendo a lista de ferramentas de C++ da Microsoft",
+        ["Getting the C++ tools: {0}"] = "Baixando as ferramentas de C++: {0}",
+        ["about 1 GB, only if missing"] = "cerca de 1 GB, só se faltarem",
         ["Looking for your disc on this PC…"] = "Procurando o seu disco no PC…",
         ["Found it on your PC."] = "Encontrado no seu PC.",
         ["Couldn't find it on this PC. Choose the file with Browse…, or drop it here."] =
@@ -185,6 +189,9 @@ public static class L
         ["Space"] = "Espaço",
         ["Want it somewhere else? Close this, move the folder, open it again."] =
             "Quer em outro lugar? Feche isto, mova a pasta e abra de novo.",
+        ["This folder is inside OneDrive"] = "Esta pasta está dentro do OneDrive",
+        ["OneDrive would upload the build while it is made, and that stops it halfway. Close this, move the folder outside OneDrive, such as C:\\Games, and open it again."] =
+            "O OneDrive tentaria enviar o build enquanto ele é feito, e isso o interrompe no meio. Feche isto, mova a pasta para fora do OneDrive, como C:\\Jogos, e abra de novo.",
         ["This folder is too deep inside other folders"] = "Esta pasta está dentro de pastas demais",
         ["The build tools can't use paths this long. Close this, move the folder somewhere shorter, such as your Desktop or C:\\Games, and open it again."] =
             "As ferramentas de build não aceitam caminhos tão longos. Feche isto, mova a pasta para um lugar mais curto, como a Área de Trabalho ou C:\\Games, e abra de novo.",

@@ -120,6 +120,8 @@ public sealed class GameFolder
         };
         start.ArgumentList.Add("-u");
         start.ArgumentList.Add("-I");
+        start.ArgumentList.Add("-X");
+        start.ArgumentList.Add("utf8"); // UTF-8 whatever Windows' code page (-I ignores PYTHONIOENCODING)
         start.ArgumentList.Add(script);
         foreach (var arg in args)
             start.ArgumentList.Add(arg);
