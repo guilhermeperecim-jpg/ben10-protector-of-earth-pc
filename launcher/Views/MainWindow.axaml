@@ -66,7 +66,41 @@
         </DockPanel>
 
         <!-- the first launch's setup -->
-        <DockPanel IsVisible="{Binding InSetup}">
+        <!-- a folder the game can't be built in: why, and the install moved for the player -->
+        <DockPanel IsVisible="{Binding FolderBlocked}">
+            <v:PageHeader DockPanel.Dock="Top" Title="{l:T 'This folder won\'t work'}" />
+            <StackPanel Margin="44,26" Spacing="16" MaxWidth="1100" HorizontalAlignment="Left">
+                <TextBlock FontSize="18" TextWrapping="Wrap"
+                           Text="{l:T 'The game is built inside the launcher\'s folder, and this one can\'t be used for that:'}" />
+                <ItemsControl ItemsSource="{Binding FolderProblems}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="l:FolderCheck+Problem">
+                            <Border Background="{StaticResource VBadBg}" BorderBrush="{StaticResource VBadLine}" BorderThickness="1"
+                                    CornerRadius="8" Padding="16,12" Margin="0,0,0,10">
+                                <StackPanel Spacing="4">
+                                    <TextBlock FontSize="17" FontWeight="SemiBold" Classes="bad" Text="{Binding Title}" />
+                                    <TextBlock FontSize="15" Foreground="{StaticResource VBadText}" TextWrapping="Wrap" Text="{Binding Detail}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock FontSize="16" Foreground="{StaticResource VMuted}" TextWrapping="Wrap" IsVisible="{Binding CanMove}"
+                           Text="{l:T 'The launcher can move itself to a folder that works and open again from there. The old folder stays: delete it afterwards.'}" />
+                <TextBlock FontSize="16" Foreground="{StaticResource VMuted}" TextWrapping="Wrap" IsVisible="{Binding CanMove}"
+                           Text="{l:T 'Or move the folder yourself, for example to C:\\Games, and open the launcher again.'}" />
+                <StackPanel Orientation="Horizontal" Spacing="14">
+                    <Button Classes="bigplay" Height="60" FontSize="19" Padding="28,0" Content="{Binding MoveButtonText}"
+                            Command="{Binding MoveFolderCommand}" IsVisible="{Binding CanMove}" IsEnabled="{Binding !Moving}" />
+                    <Button Classes="small" Height="60" FontSize="18" Padding="24,0" Content="{l:T Close}"
+                            HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                            Command="{Binding ExitCommand}" />
+                </StackPanel>
+                <TextBlock FontSize="15" Text="{Binding MoveText}" TextWrapping="Wrap" />
+            </StackPanel>
+        </DockPanel>
+
+        <DockPanel IsVisible="{Binding ShowSetup}">
             <v:PageHeader DockPanel.Dock="Top" Title="{l:T 'First launch'}" />
             <v:SetupView DataContext="{Binding Setup}" />
         </DockPanel>

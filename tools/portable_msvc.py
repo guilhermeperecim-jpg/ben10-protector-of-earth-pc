@@ -201,7 +201,9 @@ def get(folder):
     say('Unpacking the Windows SDK')
     for pl in msis:
         msi = os.path.join(sdk_dir, pl['fileName'].split('\\')[-1])
-        code = subprocess.run(['msiexec.exe', '/a', msi, '/quiet', '/qn', f'TARGETDIR={msvc_out}']).returncode
+        # one command line written out: msiexec wants PROPERTY="value with spaces", and a list quotes the whole
+        # "TARGETDIR=..." token, which msiexec rejects (1639) as soon as the folder has a space ("Ben 10 Recomp")
+        code = subprocess.run(f'msiexec.exe /a "{msi}" /quiet /qn TARGETDIR="{msvc_out}"').returncode
         if code != 0:
             raise RuntimeError(f'the Windows SDK could not be unpacked ({os.path.basename(msi)}: msiexec {code})')
     for leftover in os.listdir(msvc_out):  # the administrative installs leave a copy of each .msi at the top

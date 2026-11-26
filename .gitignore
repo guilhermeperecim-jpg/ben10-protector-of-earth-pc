@@ -55,3 +55,7 @@ dist/
 
 # o plano inicial do port: só no PC
 PLANO.md
+
+# o que o launcher cria ao rodar do repositório: a imagem do atalho (pode ser a capa do jogo) e as escolhas dele
+shortcut-icon.ico
+launcher.toml

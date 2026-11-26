@@ -358,6 +358,9 @@ public partial class SetupViewModel : ObservableObject
                 for (int i = 0; i < Steps.Count; i++)
                     Steps[i].State = i < n - 1 ? "done" : (i == n - 1 ? "now" : "next");
                 _step = n - 1;
+                ToolsNow = n == 2;
+                if (!ToolsNow)
+                    InstallerOpening = false;
                 _stepProgress = 0;
                 _stepClock.Restart();
                 LastLine = "";
@@ -384,9 +387,24 @@ public partial class SetupViewModel : ObservableObject
             Fail(SetupOutput.WithDetails(line[8..], _details));
             return;
         }
+        // the plan B: Microsoft's installer is about to open (its window and a Windows prompt)
+        if (line.Contains(": downloading Microsoft's installer", StringComparison.Ordinal))
+            InstallerOpening = true;
         if (SetupOutput.Friendly(line) is { } shown)
             LastLine = shown;
     }
+
+    // --- the notice while the C++ tools are got (step 2): what happens, and what to do if Windows asks ---
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowToolsNotice), nameof(ShowInstallerNotice))]
+    private bool _toolsNow;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowToolsNotice), nameof(ShowInstallerNotice))]
+    private bool _installerOpening;
+
+    public bool ShowToolsNotice => ToolsNow && !InstallerOpening && Building;
+    public bool ShowInstallerNotice => InstallerOpening && Building;
 
     private readonly List<string> _details = new(); // the tool's own error lines, shown under the error
 
@@ -425,6 +443,8 @@ public partial class SetupViewModel : ObservableObject
 
     private void Fail(string why)
     {
+        ToolsNow = false;
+        InstallerOpening = false;
         Error = why;
         TimeLine = "";
         foreach (var s in Steps.Where(s => s.State == "now"))
@@ -469,5 +489,19 @@ public partial class SetupViewModel : ObservableObject
         ScanText = L.T("Found it on your PC.");
         OnPropertyChanged(nameof(FolderPath));
         OnPropertyChanged(nameof(SpaceText));
+    }
+
+    /// <summary>For pictures (--shot setup-installer / setup-tools): step 2, with Microsoft's installer opening or not.</summary>
+    public void ShowToolsSample(bool installer)
+    {
+        _sample = true;
+        Page = 2;
+        _step = 1;
+        for (int i = 0; i < Steps.Count; i++)
+            Steps[i].State = i < 1 ? "done" : (i == 1 ? "now" : "next");
+        Percent = 0.05;
+        TimeLine = L.T("Under a minute so far");
+        ToolsNow = true;
+        InstallerOpening = installer;
     }
 }

@@ -113,7 +113,7 @@
                                 <StackPanel VerticalAlignment="Center" Spacing="2">
                                     <TextBlock Classes="label" Text="{l:T 'Shortcuts on your desktop'}" />
                                     <TextBlock Classes="hint" TextWrapping="Wrap"
-                                               Text="{l:T '&quot;Ben 10 Recomp&quot; starts the game straight away, &quot;Ben 10 Recomp Launcher&quot; opens this program. This folder always gets the game\'s shortcut.'}" />
+                                               Text="{l:T '&quot;Ben 10 - Protector of Earth&quot; starts the game straight away, &quot;Ben 10 Recomp Launcher&quot; opens this program. This folder always gets the game\'s shortcut.'}" />
                                 </StackPanel>
                                 <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" VerticalAlignment="Center"
                                               IsChecked="{Binding MakeShortcuts}" />
@@ -121,6 +121,13 @@
                         </Border>
                         <TextBlock Classes="hint" Margin="0,10,0,0" LineHeight="18" TextWrapping="Wrap"
                                    Text="{l:T 'No game files come with this download. The game is built here, from your own copy, and never leaves your PC.'}" />
+                        <Border Background="{StaticResource VPanel2}" CornerRadius="8" Padding="16,12" Margin="0,12,0,0">
+                            <StackPanel Spacing="4">
+                                <TextBlock FontWeight="SemiBold" Text="{l:T 'Microsoft\'s free C++ tools'}" />
+                                <TextBlock Classes="hint" LineHeight="18" TextWrapping="Wrap"
+                                           Text="{l:T 'To build the game, the launcher downloads Microsoft\'s free C++ compiler (about 570 MB) into this folder. Nothing is installed in Windows. If that download fails, Microsoft\'s own installer (Visual Studio Build Tools) opens instead and Windows asks for permission: click Yes and leave its window open until it finishes.'}" />
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>
@@ -152,6 +159,24 @@
                         <ProgressBar Minimum="0" Maximum="1" Value="{Binding Percent}" Height="10" CornerRadius="5"
                                      Classes.done="{Binding Done}" />
                     </StackPanel>
+
+                    <!-- step 2: what is happening with Microsoft's tools -->
+                    <Border Background="{StaticResource VPanel2}" BorderBrush="{StaticResource VAccent}" BorderThickness="1"
+                            CornerRadius="8" Padding="16,12" IsVisible="{Binding ShowToolsNotice}">
+                        <StackPanel Spacing="4">
+                            <TextBlock FontWeight="SemiBold" Text="{l:T 'Getting Microsoft\'s C++ compiler'}" />
+                            <TextBlock Classes="hint" LineHeight="18" TextWrapping="Wrap"
+                                       Text="{l:T 'About 570 MB from Microsoft, into this folder: nothing is installed in Windows and no permission is asked. It takes a few minutes on a normal connection.'}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{StaticResource VPanel2}" BorderBrush="{StaticResource VWarn}" BorderThickness="2"
+                            CornerRadius="8" Padding="16,12" IsVisible="{Binding ShowInstallerNotice}">
+                        <StackPanel Spacing="4">
+                            <TextBlock FontWeight="SemiBold" Classes="warn" Text="{l:T 'Microsoft\'s installer is opening'}" />
+                            <TextBlock LineHeight="19" TextWrapping="Wrap"
+                                       Text="{l:T 'The C++ tools are needed to build the game, so Microsoft\'s installer (Visual Studio Build Tools) opens now. Windows asks for permission: click Yes. Then leave its window open: it downloads a few GB and closes by itself, and the setup carries on here.'}" />
+                        </StackPanel>
+                    </Border>
 
                     <StackPanel>
                         <TextBlock Classes="cap" Text="{l:T STEPS}" />

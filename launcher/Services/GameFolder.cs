@@ -15,6 +15,10 @@ public sealed class GameFolder
     public const string DataFolder = "files";
     public const string GameExeName = "Ben 10 Recomp.exe";
     public const string LauncherName = "Ben 10 Recomp Launcher";
+    /// <summary>The game's shortcut (Windows allows no ":" in a file name).</summary>
+    public const string GameShortcutName = "Ben 10 - Protector of Earth";
+    /// <summary>The picture the player chose for the game's shortcut, made into an icon (IconMaker).</summary>
+    public string ShortcutIconPath => Path.Combine(Data, "shortcut-icon.ico");
 
     public string Root { get; }
     public string Data { get; }
@@ -138,7 +142,7 @@ public sealed class GameFolder
         try
         {
             if (GameExe is { } exe && Data != Root)
-                Shortcut(Path.Combine(Root, "Ben 10 Recomp.lnk"), exe, Data, settings, PlayArguments);
+                Shortcut(Path.Combine(Root, GameShortcutName + ".lnk"), exe, Data, GameIcon(settings), PlayArguments);
         }
         catch (Exception ex)
         {
@@ -150,8 +154,31 @@ public sealed class GameFolder
         {
             var where = folder ?? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
             if (GameExe is { } exe)
-                Shortcut(Path.Combine(where, "Ben 10 Recomp.lnk"), exe, Data, settings, PlayArguments);
+                Shortcut(Path.Combine(where, GameShortcutName + ".lnk"), exe, Data, GameIcon(settings), PlayArguments);
             Shortcut(Path.Combine(where, LauncherName + ".lnk"), settings, Root, settings);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return L.F("Couldn't make the desktop shortcuts: {0}", ex.Message);
+        }
+    }
+
+    private string GameIcon(string launcher) => File.Exists(ShortcutIconPath) ? ShortcutIconPath : launcher;
+
+    /// <summary>The game's shortcut on the desktop (and in the install folder), with the player's picture when they
+    /// chose one. Returns what went wrong, or null.</summary>
+    public string? CreateGameShortcut()
+    {
+        if (GameExe is not { } exe)
+            return L.T("The game isn't built yet.");
+        var launcher = Environment.ProcessPath ?? Path.Combine(Root, LauncherName + ".exe");
+        try
+        {
+            var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            Shortcut(Path.Combine(desktop, GameShortcutName + ".lnk"), exe, Data, GameIcon(launcher), PlayArguments);
+            if (Data != Root)
+                Shortcut(Path.Combine(Root, GameShortcutName + ".lnk"), exe, Data, GameIcon(launcher), PlayArguments);
             return null;
         }
         catch (Exception ex)

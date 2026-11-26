@@ -24,6 +24,8 @@ public partial class MainViewModel : ObservableObject
         Setup = new SetupViewModel(folder, FinishSetup);
         Updates = new UpdateViewModel(folder, () => Settings.CheckUpdates, Exit);
         InSetup = folder.NeedsSetup;
+        FolderProblems = FolderCheck.Problems(folder);
+        MoveTarget = FolderCheck.Suggested();
         Updates.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(UpdateViewModel.Mode) or nameof(UpdateViewModel.ShowNotice))
@@ -61,10 +63,45 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>First run (no game built yet): the setup in the window's place.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(OnHome), nameof(OnPage), nameof(CanPlay), nameof(Status))]
+    [NotifyPropertyChangedFor(nameof(OnHome), nameof(OnPage), nameof(CanPlay), nameof(Status), nameof(FolderBlocked),
+        nameof(ShowSetup))]
     private bool _inSetup;
 
     public bool InUpdate => Updates.Active;
+
+    // --- a folder the game can't be built in (FolderCheck): its own page, with a button that moves the install ---
+    public List<FolderCheck.Problem> FolderProblems { get; }
+    /// <summary>Only before the game is built: a built game plays wherever it is.</summary>
+    public bool FolderBlocked => InSetup && FolderProblems.Count > 0;
+    public bool ShowSetup => InSetup && !FolderBlocked;
+    public bool CanMove => !FolderProblems.Any(p => p.Title == L.T("The launcher was opened from inside the zip"));
+    public string MoveTarget { get; }
+    public string MoveButtonText => L.F("Move it to {0}", MoveTarget);
+
+    [ObservableProperty] private bool _moving;
+    [ObservableProperty] private string _moveText = "";
+
+    [RelayCommand]
+    private async Task MoveFolder()
+    {
+        if (Moving)
+            return;
+        Moving = true;
+        var target = MoveTarget;
+        try
+        {
+            await Task.Run(() => FolderCheck.CopyTo(Folder.Root, target, (done, all) =>
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => MoveText = L.F("Copying: {0} of {1} files", done, all))));
+            var launcher = Path.Combine(target, GameFolder.LauncherName + ".exe");
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(launcher) { WorkingDirectory = target, UseShellExecute = true });
+            Exit();
+        }
+        catch (Exception ex)
+        {
+            MoveText = L.F("Couldn't move it: {0}", ex.Message);
+            Moving = false;
+        }
+    }
     public bool OnHome => !InSetup && !InUpdate && Page == 0;
     public bool OnPage => !InSetup && !InUpdate && Page != 0;
     public bool IsOptions => Page == 1;
@@ -156,7 +193,7 @@ public partial class MainViewModel : ObservableObject
     public Task OnOpenedAsync()
     {
         // the first launch: the disc looked for at once (the player only checks it and presses Next)
-        if (InSetup && !Folder.HasGame && Setup.DiscPath == null)
+        if (ShowSetup && !Folder.HasGame && Setup.DiscPath == null)
             _ = Setup.ScanAsync();
         return Updates.StartAsync(InSetup);
     }
@@ -167,10 +204,18 @@ public partial class MainViewModel : ObservableObject
         switch (page)
         {
             case "options": Page = 1; break;
+            case "options-launcher": Page = 1; Settings.TabIndex = 3; break;
             case "controls": Page = 2; break;
             case "files": Page = 3; break;
             case "setup": InSetup = true; break;
+            case "folder": InSetup = true; FolderProblems.Clear(); FolderProblems.Add(new FolderCheck.Problem(
+                L.T("This folder is inside OneDrive"), L.T("OneDrive would upload the build while it is made, and that stops it halfway.")));
+                FolderProblems.Add(new FolderCheck.Problem(L.T("The folder's path has accents or special letters"),
+                L.T("Some of the build tools can't use paths with letters like á, ç or ã (often in the user's name).")));
+                OnPropertyChanged(string.Empty); break;
             case "setup-found": InSetup = true; Setup.ShowSample(); break;
+            case "setup-tools": InSetup = true; Setup.ShowToolsSample(false); break;
+            case "setup-installer": InSetup = true; Setup.ShowToolsSample(true); break;
             default: InSetup = false; Page = 0; break;
         }
     }

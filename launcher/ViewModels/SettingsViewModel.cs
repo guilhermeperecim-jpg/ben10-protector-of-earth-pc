@@ -63,6 +63,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _checkUpdates;
     [ObservableProperty] private int _languageIndex;
     [ObservableProperty] private string _note = "";
+    [ObservableProperty] private int _tabIndex; // Display, Graphics, Sound, Launcher
 
     public bool IsWindow => ModeIndex == 1;
     public bool IsGpu => RendererIndex == 0;
@@ -126,7 +127,8 @@ public partial class SettingsViewModel : ObservableObject
             case nameof(Volume): OnPropertyChanged(nameof(VolumeText)); break;
             case nameof(Sharpening): OnPropertyChanged(nameof(SharpeningText)); break;
         }
-        if (_loading || e.PropertyName is nameof(Note) or nameof(IsWindow) or nameof(IsGpu) or nameof(IsFsr) or
+        if (_loading || e.PropertyName is nameof(Note) or nameof(TabIndex) or nameof(HasShortcutPicture) or
+                nameof(ShortcutPicture) or nameof(IsWindow) or nameof(IsGpu) or nameof(IsFsr) or
                 nameof(VolumeText) or nameof(SharpeningText))
             return;
         if (e.PropertyName == nameof(LanguageIndex))
@@ -165,7 +167,56 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void MakeShortcuts() => Note = _folder.CreateShortcuts(true) ?? L.T("Shortcuts made on your desktop.");
+    private void MakeShortcuts() => Note = _folder.CreateGameShortcut() ?? L.T("The game's shortcut is on your desktop.");
+
+    // --- the picture of the game's shortcut (the player's own: nothing of it comes with the launcher) ---
+    public bool HasShortcutPicture => File.Exists(_folder.ShortcutIconPath);
+    public Avalonia.Media.Imaging.Bitmap? ShortcutPicture =>
+        HasShortcutPicture ? LoadPicture(_folder.ShortcutIconPath) : null;
+
+    private static Avalonia.Media.Imaging.Bitmap? LoadPicture(string ico)
+    {
+        try
+        {
+            // the icon's largest picture (the first one IconMaker writes: 256 px PNG)
+            var data = File.ReadAllBytes(ico);
+            int size = BitConverter.ToInt32(data, 6 + 8), offset = BitConverter.ToInt32(data, 6 + 12);
+            return new Avalonia.Media.Imaging.Bitmap(new MemoryStream(data, offset, size));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>A picture chosen (OptionsView's file picker): made into the shortcut's icon, and the shortcut made again
+    /// with it when the game is built.</summary>
+    public void SetShortcutPicture(string picture)
+    {
+        try
+        {
+            IconMaker.Make(picture, _folder.ShortcutIconPath);
+        }
+        catch (Exception ex)
+        {
+            Note = L.F("That picture couldn't be used: {0}", ex.Message);
+            return;
+        }
+        OnPropertyChanged(nameof(HasShortcutPicture));
+        OnPropertyChanged(nameof(ShortcutPicture));
+        Note = _folder.GameExe == null ? L.T("Picture saved: the shortcut gets it once the game is built.")
+            : _folder.CreateGameShortcut() ?? L.T("The game's shortcut is on your desktop, with your picture.");
+    }
+
+    [RelayCommand]
+    private void DefaultShortcutPicture()
+    {
+        try { File.Delete(_folder.ShortcutIconPath); } catch (IOException) { }
+        OnPropertyChanged(nameof(HasShortcutPicture));
+        OnPropertyChanged(nameof(ShortcutPicture));
+        if (_folder.GameExe != null)
+            Note = _folder.CreateGameShortcut() ?? L.T("The game's shortcut is on your desktop.");
+    }
 }
 
 /// <summary>The line about this PC under the pages: the graphics card (and its memory), the processor's threads and the

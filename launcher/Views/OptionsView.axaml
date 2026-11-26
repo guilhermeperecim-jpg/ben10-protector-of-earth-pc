@@ -38,7 +38,7 @@
                        Foreground="{StaticResource VMuted}" />
             <TextBlock Text="{Binding Note}" FontSize="15" Classes="warn" IsVisible="{Binding Note, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
         </StackPanel>
-        <TabControl>
+        <TabControl SelectedIndex="{Binding TabIndex}">
             <TabItem Header="{l:T Display}">
                 <ScrollViewer>
                     <StackPanel Spacing="16" Margin="0,14,0,10">
@@ -103,10 +103,29 @@
                         <TextBlock Text="{l:T Language}" />
                     </StackPanel>
                     <CheckBox Content="{l:T 'Check for updates when the launcher opens'}" IsChecked="{Binding CheckUpdates}" />
-                    <StackPanel Classes="row">
-                        <Button Classes="small" Content="{l:T 'Make them'}" Command="{Binding MakeShortcutsCommand}" />
-                        <TextBlock Text="{l:T 'Desktop shortcuts'}" />
-                    </StackPanel>
+                    <!-- the game's shortcut on the desktop, with a picture of the player's choosing -->
+                    <Border Background="{StaticResource VPanel2}" CornerRadius="8" Padding="16,14" Margin="0,6,0,0">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="18">
+                            <Border Width="96" Height="96" CornerRadius="6" Background="{StaticResource VPanel}">
+                                <Panel>
+                                    <Image Source="/Assets/icon.png" Width="72" Height="72" IsVisible="{Binding !HasShortcutPicture}" />
+                                    <Image Source="{Binding ShortcutPicture}" Width="92" Height="92" IsVisible="{Binding HasShortcutPicture}" />
+                                </Panel>
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="10" VerticalAlignment="Center">
+                                <TextBlock FontSize="18" FontWeight="SemiBold" Text="{l:T 'The game\'s shortcut'}" />
+                                <TextBlock FontSize="15" Foreground="{StaticResource VMuted}" TextWrapping="Wrap"
+                                           Text="{l:T '&quot;Ben 10 - Protector of Earth&quot; on your desktop: it starts the game straight away. Its picture can be any image on your PC (PNG, JPG, WebP); it stays on your PC.'}" />
+                                <WrapPanel>
+                                    <Button Classes="small" Margin="0,0,10,6" Content="{l:T 'Put it on the desktop'}"
+                                            Command="{Binding MakeShortcutsCommand}" />
+                                    <Button Classes="small" Margin="0,0,10,6" Content="{l:T 'Choose a picture…'}" Click="OnChoosePicture" />
+                                    <Button Classes="small" Margin="0,0,10,6" Content="{l:T 'Use the standard icon'}"
+                                            Command="{Binding DefaultShortcutPictureCommand}" IsVisible="{Binding HasShortcutPicture}" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
                 </StackPanel>
             </TabItem>
         </TabControl>

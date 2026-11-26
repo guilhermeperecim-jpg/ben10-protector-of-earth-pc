@@ -32,6 +32,15 @@ internal static class Program
                                   "  " + iso);
             return;
         }
+        // Dev: a picture made into the shortcut's icon (IconMaker): --make-icon <picture> <out.ico>
+        if (args.Length >= 3 && args[0] == "--make-icon")
+        {
+            AppBuilder.Configure<App>().UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
+                .SetupWithoutStarting();
+            IconMaker.Make(args[1], args[2]);
+            Console.WriteLine("icon: " + args[2]);
+            return;
+        }
         // --update: open on the new version's notes (the game's update popup)
         ViewModels.UpdateViewModel.OpenOnUpdate = args.Contains("--update");
         ViewModels.UpdateViewModel.OpenOnRebuild = args.Contains("--rebuild");

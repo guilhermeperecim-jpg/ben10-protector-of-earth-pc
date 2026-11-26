@@ -166,6 +166,53 @@ public static class L
         ["YOUR DISC"] = "SEU DISCO",
         ["Search this PC"] = "Procurar no PC",
         ["Unpacking the Windows SDK"] = "Descompactando o Windows SDK",
+        // the game's shortcut
+        ["The game's shortcut"] = "O atalho do jogo",
+        ["\"Ben 10 - Protector of Earth\" on your desktop: it starts the game straight away. Its picture can be any image on your PC (PNG, JPG, WebP); it stays on your PC."] =
+            "\"Ben 10 - Protector of Earth\" na área de trabalho: abre o jogo direto. A imagem pode ser qualquer uma do seu PC (PNG, JPG, WebP); ela fica só no seu PC.",
+        ["Put it on the desktop"] = "Colocar na área de trabalho",
+        ["Choose a picture…"] = "Escolher imagem…",
+        ["Use the standard icon"] = "Usar o ícone padrão",
+        ["A picture for the game's shortcut"] = "Uma imagem para o atalho do jogo",
+        ["Pictures"] = "Imagens",
+        ["The game's shortcut is on your desktop."] = "O atalho do jogo está na área de trabalho.",
+        ["The game's shortcut is on your desktop, with your picture."] = "O atalho do jogo está na área de trabalho, com a sua imagem.",
+        ["Picture saved: the shortcut gets it once the game is built."] = "Imagem salva: o atalho a recebe quando o jogo estiver montado.",
+        ["That picture couldn't be used: {0}"] = "Essa imagem não pôde ser usada: {0}",
+        // the folder check (FolderCheck)
+        ["This folder won't work"] = "Esta pasta não serve",
+        ["The game is built inside the launcher's folder, and this one can't be used for that:"] =
+            "O jogo é montado dentro da pasta do launcher, e esta não pode ser usada para isso:",
+        ["The launcher was opened from inside the zip"] = "O launcher foi aberto de dentro do zip",
+        ["Windows only unpacked the launcher itself, not the rest. Unzip the whole download first (right-click the zip > Extract All), then open the launcher from the folder you extracted."] =
+            "O Windows só descompactou o launcher, não o resto. Descompacte o download inteiro primeiro (botão direito no zip > Extrair Tudo) e abra o launcher pela pasta extraída.",
+        ["OneDrive would upload the build while it is made, and that stops it halfway."] =
+            "O OneDrive tentaria enviar o build enquanto ele é feito, e isso o interrompe no meio.",
+        ["Its path has {0} characters; the build tools need it under {1}."] =
+            "O caminho tem {0} caracteres; as ferramentas de build precisam de menos de {1}.",
+        ["The folder's path has accents or special letters"] = "O caminho da pasta tem acentos ou letras especiais",
+        ["Some of the build tools can't use paths with letters like á, ç or ã (often in the user's name)."] =
+            "Algumas ferramentas de build não aceitam caminhos com letras como á, ç ou ã (muitas vezes no nome do usuário).",
+        ["Windows protects this folder"] = "O Windows protege esta pasta",
+        ["The launcher can't write here (Program Files and Windows are protected)."] =
+            "O launcher não consegue gravar aqui (Arquivos de Programas e Windows são protegidas).",
+        ["The launcher can move itself to a folder that works and open again from there. The old folder stays: delete it afterwards."] =
+            "O launcher pode se mover para uma pasta que funciona e abrir de novo de lá. A pasta antiga fica: apague-a depois.",
+        ["Or move the folder yourself, for example to C:\\Games, and open the launcher again."] =
+            "Ou mova a pasta você mesmo, por exemplo para C:\\Jogos, e abra o launcher de novo.",
+        ["Move it to {0}"] = "Mover para {0}",
+        ["Close"] = "Fechar",
+        ["Copying: {0} of {1} files"] = "Copiando: {0} de {1} arquivos",
+        ["Couldn't move it: {0}"] = "Não foi possível mover: {0}",
+        ["Microsoft's free C++ tools"] = "As ferramentas de C++ gratuitas da Microsoft",
+        ["To build the game, the launcher downloads Microsoft's free C++ compiler (about 570 MB) into this folder. Nothing is installed in Windows. If that download fails, Microsoft's own installer (Visual Studio Build Tools) opens instead and Windows asks for permission: click Yes and leave its window open until it finishes."] =
+            "Para montar o jogo, o launcher baixa o compilador de C++ gratuito da Microsoft (uns 570 MB) para dentro desta pasta. Nada é instalado no Windows. Se esse download falhar, abre no lugar o instalador da própria Microsoft (Visual Studio Build Tools) e o Windows pede permissão: clique em Sim e deixe a janela dele aberta até terminar.",
+        ["Getting Microsoft's C++ compiler"] = "Baixando o compilador de C++ da Microsoft",
+        ["About 570 MB from Microsoft, into this folder: nothing is installed in Windows and no permission is asked. It takes a few minutes on a normal connection."] =
+            "Uns 570 MB da Microsoft, para dentro desta pasta: nada é instalado no Windows e nenhuma permissão é pedida. Leva alguns minutos numa conexão comum.",
+        ["Microsoft's installer is opening"] = "O instalador da Microsoft vai abrir",
+        ["The C++ tools are needed to build the game, so Microsoft's installer (Visual Studio Build Tools) opens now. Windows asks for permission: click Yes. Then leave its window open: it downloads a few GB and closes by itself, and the setup carries on here."] =
+            "As ferramentas de C++ são necessárias para montar o jogo, então o instalador da Microsoft (Visual Studio Build Tools) abre agora. O Windows vai pedir permissão: clique em Sim. Depois deixe a janela dele aberta: ele baixa alguns GB, fecha sozinho e a instalação continua aqui.",
         ["Reading Microsoft's list of the C++ tools"] = "Lendo a lista de ferramentas de C++ da Microsoft",
         ["Getting the C++ tools: {0}"] = "Baixando as ferramentas de C++: {0}",
         ["about 1 GB, only if missing"] = "cerca de 1 GB, só se faltarem",
@@ -197,8 +244,8 @@ public static class L
             "As ferramentas de build não aceitam caminhos tão longos. Feche isto, mova a pasta para um lugar mais curto, como a Área de Trabalho ou C:\\Games, e abra de novo.",
         ["WHEN IT'S BUILT"] = "QUANDO ESTIVER PRONTO",
         ["Shortcuts on your desktop"] = "Atalhos na área de trabalho",
-        ["\"Ben 10 Recomp\" starts the game straight away, \"Ben 10 Recomp Launcher\" opens this program. This folder always gets the game's shortcut."] =
-            "\"Ben 10 Recomp\" abre o jogo direto, \"Ben 10 Recomp Launcher\" abre este programa. Esta pasta sempre ganha o atalho do jogo.",
+        ["\"Ben 10 - Protector of Earth\" starts the game straight away, \"Ben 10 Recomp Launcher\" opens this program. This folder always gets the game's shortcut."] =
+            "\"Ben 10 - Protector of Earth\" abre o jogo direto, \"Ben 10 Recomp Launcher\" abre este programa. Esta pasta sempre ganha o atalho do jogo.",
         ["No game files come with this download. The game is built here, from your own copy, and never leaves your PC."] =
             "Nenhum arquivo do jogo vem neste download. O jogo é montado aqui, a partir da sua cópia, e nunca sai do seu PC.",
         ["About 15 GB needed"] = "Precisa de uns 15 GB",
