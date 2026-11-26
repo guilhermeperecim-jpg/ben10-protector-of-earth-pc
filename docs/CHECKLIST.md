@@ -86,15 +86,91 @@ Critério: 60 FPS na fase, sem defeitos. **Atingido** na primeira fase (Grand Ca
 - Paridade de campo do `sceGsSyncV` (não vi piscar até aqui)
 - Som (fase 4): não verificado
 
-## Fase 4: som e saves (em andamento)
+## Fase 4: som e saves (concluída em 2026-11-25)
 
-Critério: música, efeitos e save funcionando.
+Critério: música, efeitos e save funcionando. **Atingido:** som bom e jogo liso jogando (confirmado por você), save gravado e carregado com "Continue".
 
 - [x] Som sendo gerado (`VENDETTA_AUDIODUMP`): silêncio nas telas do cartão de memória, música a partir da tela de título (~-29 dB), som contínuo na fase com picos nos golpes (-4 a -6 dB). O SPU2 do runtime do Def Jam já tem reverb
 - [x] Save completo por roteiro: nova partida → fase → pausa → "Return to Map" → "Saving data" → mapa; reaberto com o mesmo cartão, "Continue Game" mostra "0:00 Grand Canyon" e carrega o mapa
 - [x] `OPMULA`/`OPMSUB` no caminho rápido do VU1 (o produto vetorial do descarte de faces, em todo laço de vértices)
 - [x] Jogando, o som está bom (você confirmou). Os cortes vinham junto com pequenas travadas
 - [x] Uma causa das travadas: o runtime imprimia `[MC] GetInfo`/`[MC] Sync` a cada consulta do jogo ao cartão de memória (146 KB numa sessão), e a thread do jogo ficava até ~90 ms presa na escrita (`ZwWriteFile` nas amostras do novo relatório `[stall]` do `VENDETTA_HOSTPROF`). Agora só com `VENDETTA_MCLOG`
-- [ ] Conferir jogando (`tools\play.ps1 -Log`) se ainda há travadas; o `build\run\play.log` traz os `[stall]` com o que cada thread fazia
+- [x] Sessão jogando com `tools\play.ps1 -Log` (~2,5 min): nenhuma travada (`[stall]`), 285 quadros de áudio faltando no total (~6 ms), 60 quadros por segundo produzidos; liso jogando
 - Nos testes automáticos a janela fica atrás das outras e o Windows segura a apresentação (90% do tempo da GPU em vsync), o que também trava a emulação: as travadas medidas ali não valem para o jogo em primeiro plano
-- [ ] A foto do local no mapa ("Grand Canyon") aparece como um quadro cinza: conferir se é assim no PS2 (talvez seja um vídeo, fase 5)
+
+### O que fica para depois
+
+- A foto do local no mapa ("Grand Canyon") aparece como um quadro cinza: conferir se é assim no PS2 (não é um vídeo Bink: nenhum `Play` acontece no mapa até onde testamos)
+- A janela às vezes descarta um quadro do jogo (`window-skips`, 3 a 14 por segundo): sincronia entre o ritmo do jogo e o do monitor (fase 6). Jogando, não se nota
+
+## Fase 5: vídeos (concluída em 2026-11-26)
+
+- [x] Os 69 vídeos do jogo são Bink 1 (`.bik` no GAME.WAD); o player do jogo (`CBinkPlayer`) usa a biblioteca RAD ligada no ELF, que lê o arquivo pelo módulo RAD no IOP
+- [x] IOP: heap a partir de `0x80000` (era `0x120000`, pequeno demais: o `sceSifAllocIopHeap` da RAD falhava), `LoadModuleBuffer` lendo a RAM do IOP, e `argc/argv` de verdade no `start` dos módulos (o módulo RAD agora inicia)
+- [x] Mesmo assim a RAD no IOP não andava (tela preta, o vídeo nunca terminava). Decisão: as funções da biblioteca Bink (`BinkOpen/Wait/DoFrame/CopyToBuffer/NextFrame/Goto/Pause/Close`) trocadas por `overrides/ben10_videos.cpp`, que decodifica com o FFmpeg (já embutido no runtime) lendo o `.bik` direto da ISO no setor que o jogo procurou; o resto continua sendo do jogo (desenho do quadro, fim, pular, volume)
+- [x] Som do vídeo convertido para 48 kHz e mixado na saída do jogo; o `BinkWait` espera o VBlank pelo agendador (dormir na thread do jogo travava o IOP e o som saía na metade da velocidade)
+- [x] O desligamento da RAD chamava `sceSifStopModule`, um RPC que o nosso IOP não atende: o jogo ficava preto depois da intro. Agora vai para o `SifStopModule` do runtime (e `sceSifUnloadModule` só retorna)
+- [x] Logos de abertura (ESRB, Legal, CN, D3, HVSIntro) tocam inteiros com som e o jogo chega à tela de título
+- [x] `11_intro` (início da primeira fase, 2245 quadros) toca inteiro (74,8 s de som) e o jogo entra na fase; apertar X durante o vídeo pula, como no PS2
+- [x] Você assistiu com a janela na frente: imagem, som e sincronia bons (confirmado em 2026-11-26)
+
+### Comandos
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\play.ps1
+```
+
+Diagnóstico: cada vídeo escreve uma linha no fim (`[videos] ... closed at frame N of M (X s of sound mixed ...)`); `PS2X_VIDEOS=0` desliga (só para comparar: com a RAD original o vídeo fica preto).
+
+### O que fica para depois
+
+- Os outros vídeos (cenas entre fases) passam pelo mesmo caminho, mas só os de abertura e o `11_intro` foram vistos
+- `BinkGoto` para trás (usado pelos comandos de script `avpSetFrame`/`avpHoldFrame`) reabre o arquivo e segue sem som; nenhum vídeo testado usou
+
+## Fase 6: recursos de PC (concluída em 2026-11-26)
+
+- [x] Widescreen (`overrides/ben10_widescreen.cpp`): a projeção da câmera (`FUN_00119408`) alargada pelo formato escolhido, a mesma mudança do patch de widescreen do PCSX2 para este ELF (CRC `8FCCB5D9`), aqui calculada para qualquer formato. Fases em 16:9 com mais cenário dos lados (o pause também); título, menus, dicas de carregamento, vídeos e o mapa em 4:3 (os menus são mapas `99_*`, reconhecidos pela mensagem "Opening" do próprio jogo). O HUD fica esticado, como no PCSX2
+- [x] `settings.toml` do Ben 10 (o do Def Jam tinha lutadores, câmera de luta, velocidade da luta, atualizações): tela, formato, gráficos, som, vibração e teclado (ligado por padrão). Nitidez padrão 8x (16x pesa demais numa GTX 1650). `tools\play.ps1` não força mais nada: as opções vêm de `build\run\settings.toml` (apague para voltar ao padrão)
+- [x] Sem acesso à rede: a checagem de atualização do runtime só roda com um repositório configurado, e o nosso não tem
+- [x] Foto cinza no mapa: é o "cartão-postal" do local com os três espaços de cards Sumo Slammer, vazio numa fase recém-começada; o jogo não acusa arquivo faltando. Falta confirmar depois de completar uma fase
+- [x] Você conferiu na janela da frente: widescreen bom na fase e no pause (confirmado em 2026-11-26)
+
+### Fora desta fase
+
+- 60 FPS de lógica: o patch do PCSX2 põe `1` em `0x268558` (o intervalo de VBlanks por quadro do jogo); o próprio PCSX2 deixa o patch de 60 FPS desligado porque quebra o pulo
+- A janela às vezes descarta um quadro (`window-skips`); jogando você não notou
+
+## Fase 7: launcher e pacote público (concluída em 2026-11-26)
+
+Modelo: o pacote público não leva nada do jogo. O launcher confere a ISO do jogador e monta o jogo no PC dele (como o
+Def Jam e o PL:A Recomp).
+
+- [x] Launcher (`launcher/`, .NET 10 + Avalonia, adaptado do programa de configurações do Def Jam, GPL-3.0) com o visual
+  do PL:A Recomp: tela inicial com arte nossa (vetorial, nada do jogo ou do desenho), JOGAR, OPÇÕES, CONTROLES, ARQUIVOS
+  DO JOGO, SAIR; status, hardware (placa, CPU, RAM), versão e aviso de atualização
+- [x] Opções (Tela, Gráficos, Som, Launcher), salvas no `settings.toml` a cada mudança; Controles com o mapa real do
+  teclado (`ps2_pad.cpp`), teclado e vibração; Arquivos do jogo (disco, jogo montado, pastas, montar de novo, outro disco)
+- [x] Português e inglês (`L.T`, `{l:T ...}`), automático pelo idioma do Windows ou escolhido em Opções › Launcher
+  (`launcher.toml`)
+- [x] Ícone nosso (`tools/make_icon.py`, sem bibliotecas), no launcher e na janela do jogo
+- [x] `tools/prepare_disc.py`: confere a ISO (hash do `SLUS_216.61` v1.01), copia para `disc\SLUS-21661.iso` e extrai o
+  executável; recusa outra versão ou arquivo errado
+- [x] `tools/setup_game.py` (do Def Jam): disco, ferramentas de build da Microsoft (instaladas se faltarem), recompilador,
+  código do jogo em C++, o jogo, shaders, fim; erros em palavras simples
+- [x] O jogo acha a ISO sozinho (`disc\SLUS-21661.iso` ao lado de `game\`) quando aberto pelo atalho
+- [x] `tools/make_release.py`: `dist\Ben10-Recomp-Windows.zip` com o launcher, Python portátil e o código-fonte (PS2Recomp
+  com os patches aplicados, paraLLEl-GS, bibliotecas); recusa qualquer nome de arquivo do jogo e código gerado
+- [x] Atualizações pelas releases do GitHub (`guilhermeperecim-jpg/ben10-protector-of-earth-pc`, quando for público)
+- [x] Instalação de teste do zero (`C:\b10test`, `tools/setup_game.py`): ~25 min de build + ~20 min de shaders. Aberto sem nenhuma variável de ambiente, como pelo atalho: acha a ISO, o `settings.toml` e o cartão sozinho; logos, vídeos, título, menu e a fase em widescreen
+- [x] Achado no teste: o runtime abre os `cdrom0:` (módulos IRX, `IOPRP300.IMG`, `SYSTEM.CNF`, `GAME.DIR`) pela pasta `game\`; o `prepare_disc.py` agora extrai todos os arquivos do disco menos o `GAME.WAD` (2,4 GB, lido por setor da ISO pelo CDARB)
+- [x] Achado no zip: o `git archive` do paraLLEl-GS deixava de fora os 5 arquivos que o patch do Def Jam cria (o build do jogador parava em `sample_circuit_scaled.hpp`); o `make_release.py` agora parte do commit original `cc6184a` e aplica o patch, como o Def Jam
+- [x] Zip conferido: nenhum trecho do executável do jogo, nenhum ELF/ISO do jogo, nenhum código gerado
+- [x] Zip gerado (`dist\Ben10-Recomp-Windows.zip`, 86 MB) e instalado do zero numa pasta limpa (`C:\b10zip`) só com o que vem nele (Python e bibliotecas do pacote): 7 etapas OK; o jogo acha a ISO sozinho, os 5 vídeos de abertura tocam inteiros com som, e vai do título até a fase em widescreen
+- [x] Você testou o launcher (confirmado em 2026-11-26)
+- [x] Busca automática da ISO na primeira abertura (`launcher/Services/DiscFinder.cs`): pastas do usuário e discos,
+  com limite de pastas e de tempo, nomes parecidos com o do jogo primeiro, cada candidata conferida pelo hash (0,8 s
+  neste PC); "Procurar no PC" refaz a busca; `--find-disc` mostra o que ela acha
+- [x] `THIRD-PARTY-NOTICES.txt` (as partes de terceiros e as licenças, conferidas nos próprios arquivos)
+- [x] README para jogadores: link de download, 4 passos, telas do launcher (`docs/images/launcher-*.png`, desenhadas
+  pelo `--shot` com pastas de exemplo e sem o hardware deste PC), requisitos, controles e créditos
+- [x] Histórico do git conferido inteiro antes de publicar: nada do jogo

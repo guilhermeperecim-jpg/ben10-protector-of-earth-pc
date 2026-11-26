@@ -1,0 +1,186 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ben10Launcher.ViewModels"
+             xmlns:l="using:Ben10Launcher.Services"
+             x:Class="Ben10Launcher.Views.SetupView"
+             x:DataType="vm:SetupViewModel">
+    <!-- the first launch: 1 your disc, 2 building the game. Adapted from def-jam-vendetta-recomp's settings program
+         (GPL-3.0). -->
+    <Panel>
+        <!-- 1: your disc -->
+        <DockPanel Margin="44,22" IsVisible="{Binding IsDiscPage}">
+            <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,20">
+                <TextBlock FontSize="24" FontWeight="Bold" Text="{l:T 'Choose your disc'}" />
+                <TextBlock Classes="muted" FontSize="16" TextWrapping="Wrap"
+                           Text="{l:T 'Your own copy of Ben 10: Protector of Earth for PlayStation 2, USA version 1.01 (SLUS-21661), as an .iso file.'}" />
+            </StackPanel>
+            <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
+                <Button Grid.Column="1" Classes="bigplay" Height="64" FontSize="20" Padding="28,0"
+                        Content="{l:T 'Next: build the game'}" Command="{Binding BuildCommand}" IsEnabled="{Binding CanBuild}" />
+            </Grid>
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="20">
+                    <StackPanel>
+                        <TextBlock Classes="cap" Text="{l:T 'YOUR DISC'}" />
+                        <Border Classes="capline" Margin="0,8,0,12" />
+                        <!-- found by itself (DiscFinder), or why not -->
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12" Margin="0,0,0,12">
+                            <ProgressBar IsIndeterminate="True" Width="70" Height="6" MinWidth="0"
+                                         IsVisible="{Binding Scanning}" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" FontSize="16" VerticalAlignment="Center" TextWrapping="Wrap"
+                                       Text="{Binding ScanText}" IsVisible="{Binding ShowScanText}" />
+                            <!-- never disabled: a disabled focused button sends the focus on, and the page scrolled to it -->
+                            <Button Grid.Column="2" Classes="small" Content="{l:T 'Search this PC'}" Command="{Binding ScanCommand}" />
+                        </Grid>
+                        <Panel x:Name="DropZone" DragDrop.AllowDrop="True" Background="Transparent">
+                            <Rectangle Stroke="{StaticResource VLine}" StrokeThickness="1" StrokeDashArray="4,3" RadiusX="8" RadiusY="8" />
+                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14" Margin="16,14">
+                                <PathIcon Width="26" Height="26" Foreground="{StaticResource VAccent}"
+                                          Data="F1 M12,2 A10,10 0 1 1 11.99,2 Z M12,9 A3,3 0 1 0 12.01,9 Z" />
+                                <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="16" Foreground="{StaticResource VText2}"
+                                           Text="{l:T 'Drop the disc file here'}" />
+                                <Button Grid.Column="2" Classes="small" Content="{l:T 'Browse…'}" Click="OnBrowse" />
+                            </Grid>
+                        </Panel>
+
+                        <TextBlock Classes="hint" Text="{l:T 'Checking the disc…'}" IsVisible="{Binding Checking}" Margin="0,12,0,0" />
+
+                        <Border Background="{StaticResource VGoodBg}" BorderBrush="{StaticResource VGoodLine}" BorderThickness="1"
+                                CornerRadius="8" Padding="16,12" Margin="0,12,0,0" IsVisible="{Binding ShowDiscOk}">
+                            <StackPanel Spacing="8">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="{l:T '✓ Ben 10: Protector of Earth found'}" FontWeight="SemiBold" Classes="good"
+                                               VerticalAlignment="Center" />
+                                    <Border Classes="tag good"><TextBlock Text="SLUS-21661" /></Border>
+                                </StackPanel>
+                                <Grid ColumnDefinitions="110,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="5">
+                                    <TextBlock Foreground="{StaticResource VGoodLabel}" FontSize="13" Text="{l:T Console}" />
+                                    <TextBlock Grid.Column="1" Classes="mono" Text="PlayStation 2" />
+                                    <TextBlock Grid.Row="1" Foreground="{StaticResource VGoodLabel}" FontSize="13" Text="{l:T Region}" />
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Classes="mono" Text="USA (NTSC-U)" />
+                                    <TextBlock Grid.Row="2" Foreground="{StaticResource VGoodLabel}" FontSize="13" Text="{l:T Version}" />
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Classes="mono" Text="1.01" />
+                                    <TextBlock Grid.Row="3" Foreground="{StaticResource VGoodLabel}" FontSize="13" Text="{l:T File}" />
+                                    <TextBlock Grid.Row="3" Grid.Column="1" Classes="mono" TextWrapping="Wrap" Text="{Binding DiscPath}" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource VBadBg}" BorderBrush="{StaticResource VBadLine}" BorderThickness="1"
+                                CornerRadius="8" Padding="16,12" Margin="0,12,0,0" IsVisible="{Binding ShowDiscBad}">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="{l:T 'That\'s not the disc this needs'}" FontWeight="SemiBold" Classes="bad" />
+                                <TextBlock FontSize="13" Foreground="{StaticResource VBadText}" TextWrapping="Wrap" Text="{Binding DiscProblem}" />
+                                <TextBlock Classes="mono" Foreground="{StaticResource VBadText}" TextWrapping="Wrap" Text="{Binding DiscPath}" />
+                            </StackPanel>
+                        </Border>
+
+                        <Border Background="{StaticResource VGoodBg}" BorderBrush="{StaticResource VGoodLine}" BorderThickness="1"
+                                CornerRadius="8" Padding="16,12" Margin="0,12,0,0" IsVisible="{Binding DiscAlreadyRead}">
+                            <TextBlock Classes="good" FontSize="13.5" TextWrapping="Wrap"
+                                       Text="{l:T '✓ Your disc was already read in an earlier try: Next carries on from there (or choose the disc again).'}" />
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel>
+                        <TextBlock Classes="cap" Text="{l:T 'WHERE IT GOES'}" />
+                        <Border Classes="capline" Margin="0,8,0,8" />
+                        <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto" RowSpacing="7">
+                            <TextBlock Classes="key" Text="{l:T Folder}" />
+                            <TextBlock Grid.Column="1" Classes="mono" TextWrapping="Wrap" Text="{Binding FolderPath}" />
+                            <TextBlock Grid.Row="1" Classes="key" Text="{l:T Space}" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Classes="muted" FontSize="13" Text="{Binding SpaceText}" />
+                        </Grid>
+                        <TextBlock Classes="hint" Margin="0,8,0,0"
+                                   Text="{l:T 'Want it somewhere else? Close this, move the folder, open it again.'}" />
+                        <StackPanel Margin="0,10,0,0" Spacing="2" IsVisible="{Binding FolderTooLong}">
+                            <TextBlock Text="{l:T 'This folder is too deep inside other folders'}" FontWeight="SemiBold" Classes="bad" />
+                            <TextBlock Classes="hint" TextWrapping="Wrap"
+                                       Text="{l:T 'The build tools can\'t use paths this long. Close this, move the folder somewhere shorter, such as your Desktop or C:\\Games, and open it again.'}" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel>
+                        <TextBlock Classes="cap" Text="{l:T 'WHEN IT\'S BUILT'}" />
+                        <Border Classes="capline" />
+                        <Border Classes="row" BorderThickness="0">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                                <StackPanel VerticalAlignment="Center" Spacing="2">
+                                    <TextBlock Classes="label" Text="{l:T 'Shortcuts on your desktop'}" />
+                                    <TextBlock Classes="hint" TextWrapping="Wrap"
+                                               Text="{l:T '&quot;Ben 10 Recomp&quot; starts the game straight away, &quot;Ben 10 Recomp Launcher&quot; opens this program. This folder always gets the game\'s shortcut.'}" />
+                                </StackPanel>
+                                <ToggleSwitch Grid.Column="1" OnContent="" OffContent="" VerticalAlignment="Center"
+                                              IsChecked="{Binding MakeShortcuts}" />
+                            </Grid>
+                        </Border>
+                        <TextBlock Classes="hint" Margin="0,10,0,0" LineHeight="18" TextWrapping="Wrap"
+                                   Text="{l:T 'No game files come with this download. The game is built here, from your own copy, and never leaves your PC.'}" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+
+        <!-- 2: building -->
+        <DockPanel Margin="44,22" IsVisible="{Binding IsBuildPage}">
+            <TextBlock DockPanel.Dock="Top" FontSize="24" FontWeight="Bold" Text="{Binding Title}" Margin="0,0,0,20" />
+            <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*,Auto" Margin="0,14,0,0">
+                <Button Classes="small" Content="{l:T Cancel}" Command="{Binding CancelCommand}" IsVisible="{Binding Building}" />
+                <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding HasError}">
+                    <Button Classes="small" Content="{l:T Back}" Command="{Binding BackCommand}" />
+                    <Button Classes="small" Content="{l:T 'Open the log'}" Command="{Binding OpenLogCommand}" />
+                </StackPanel>
+                <TextBlock Grid.Column="0" Grid.ColumnSpan="2" Classes="warn" FontSize="13" VerticalAlignment="Center"
+                           TextWrapping="Wrap" Text="{Binding ShortcutProblem}" IsVisible="{Binding HasShortcutProblem}" />
+                <Button Grid.Column="2" Classes="bigplay" Height="56" FontSize="19" Padding="28,0" Content="{l:T 'Try again'}"
+                        Command="{Binding TryAgainCommand}" IsVisible="{Binding HasError}" />
+                <Button Grid.Column="2" Classes="bigplay" Height="56" FontSize="19" Padding="28,0" Content="{l:T Continue}"
+                        Command="{Binding ContinueCommand}" IsEnabled="{Binding Done}" IsVisible="{Binding !HasError}" />
+            </Grid>
+            <ScrollViewer x:Name="BuildScroll" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Spacing="20">
+                    <StackPanel Spacing="8">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="{Binding PercentText}" FontWeight="SemiBold" FontSize="16" />
+                            <TextBlock Grid.Column="1" Classes="muted" FontSize="16" Text="{Binding TimeLine}" />
+                        </Grid>
+                        <ProgressBar Minimum="0" Maximum="1" Value="{Binding Percent}" Height="10" CornerRadius="5"
+                                     Classes.done="{Binding Done}" />
+                    </StackPanel>
+
+                    <StackPanel>
+                        <TextBlock Classes="cap" Text="{l:T STEPS}" />
+                        <Border Classes="capline" />
+                        <ItemsControl ItemsSource="{Binding Steps}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:SetupStep">
+                                    <Border Classes="steprow" Classes.now="{Binding IsNow}" Height="40" Padding="10,0" Margin="-10,0">
+                                        <Grid ColumnDefinitions="18,*,Auto" ColumnSpacing="12" VerticalAlignment="Center">
+                                            <TextBlock FontWeight="Bold" Text="{Binding Mark}"
+                                                       Classes.good="{Binding IsDone}" Classes.warn="{Binding IsNow}"
+                                                       Classes.muted="{Binding IsNext}" />
+                                            <TextBlock Grid.Column="1" FontSize="15" Text="{Binding Label}" Classes.strong="{Binding IsNow}"
+                                                       Classes.muted="{Binding IsNext}" />
+                                            <TextBlock Grid.Column="2" Classes="hint" Text="{Binding Note}" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Classes="mono muted" FontSize="12" Margin="0,10,0,0" TextTrimming="CharacterEllipsis"
+                                   Text="{Binding LastLine}" IsVisible="{Binding Building}" />
+                    </StackPanel>
+
+                    <Border Background="{StaticResource VBadBg}" BorderBrush="{StaticResource VBadLine}" BorderThickness="1"
+                            CornerRadius="8" Padding="16,12" IsVisible="{Binding HasError}">
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="{l:T 'What went wrong'}" FontWeight="SemiBold" Classes="bad" />
+                            <SelectableTextBlock FontSize="13" Foreground="{StaticResource VBadText}" TextWrapping="Wrap" Text="{Binding Error}" />
+                            <TextBlock Classes="hint" TextWrapping="Wrap" Text="{Binding LogPath}" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Panel>
+</UserControl>

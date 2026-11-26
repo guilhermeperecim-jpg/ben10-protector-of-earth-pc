@@ -45,7 +45,8 @@ def main():
     lines += ''.join(f'  "-{n}@0x{a:08X}",\n' for a, n in sorted(unbound.items()))
     toml = re.sub(r'^stubs = \[.*?^\]', lambda m: 'stubs = [\n' + lines + ']', ghidra, count=1, flags=re.S | re.M)
     root = ROOT.replace(os.sep, '/')
-    paths = {'input': f'{root}/game/SLUS_216.61', 'output': f'{root}/generated',
+    data = (os.environ.get('BEN10_DATA') or ROOT).replace(os.sep, '/')  # where game/ is (a player's install)
+    paths = {'input': f'{data}/game/SLUS_216.61', 'output': f'{root}/generated',
              'ghidra_output': f'{root}/config/ben10_functions.csv'}
     for key, value in paths.items():
         toml, n = re.subn(rf'^{key} = .*$', f'{key} = "{value}"', toml, count=1, flags=re.M)

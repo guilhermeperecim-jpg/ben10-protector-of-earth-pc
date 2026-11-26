@@ -1,0 +1,272 @@
+using System.Diagnostics;
+
+namespace Ben10Launcher.Services;
+
+/// <summary>Where everything is. <see cref="Root"/> = the install folder (this program and the read-me);
+/// <see cref="Data"/> = where the rest lives: the game program, the executable from the disc (<c>game\SLUS_216.61</c>),
+/// the disc image (<c>disc\SLUS-21661.iso</c>), the memory card (<c>game\mc0</c>), <c>settings.toml</c>, <c>logs\</c>
+/// and the build kit. Adapted from def-jam-vendetta-recomp's settings program (GPL-3.0). A player's install keeps
+/// those in <c>files\</c> so the top of the folder stays simple; in the repository (a developer build, this program
+/// deep in <c>launcher\bin\…</c>) both are its root. Found by looking up from this program's folder;
+/// BEN10_ROOT=&lt;folder&gt; picks it by hand.</summary>
+public sealed class GameFolder
+{
+    public const string Serial = "SLUS-21661";
+    public const string DataFolder = "files";
+    public const string GameExeName = "Ben 10 Recomp.exe";
+    public const string LauncherName = "Ben 10 Recomp Launcher";
+
+    public string Root { get; }
+    public string Data { get; }
+    public string SettingsPath => Path.Combine(Data, "settings.toml");
+    public string ElfPath => Path.Combine(Data, "game", "SLUS_216.61");
+    public string DiscPath => Path.Combine(Data, "disc", "SLUS-21661.iso");
+    public string SavesPath => Path.Combine(Data, "game", "mc0");
+    public string LogsPath => Path.Combine(Data, "logs");
+    public bool HasGame => File.Exists(ElfPath);
+
+    /// <summary>The game program: the newest of the places a build puts it (a player's install: in <c>files\</c>).</summary>
+    public string? GameExe =>
+        new[]
+        {
+            Path.Combine(Data, GameExeName),
+            Path.Combine(Data, "build", "game", "ps2xRuntime", "ps2EntryRunner.exe"),
+            Path.Combine(Data, "build", "ps2recomp-dj", "ps2xRuntime", "ps2EntryRunner.exe"), // the repository: tools\build.ps1
+        }
+        .Where(File.Exists)
+        .OrderByDescending(File.GetLastWriteTimeUtc)
+        .FirstOrDefault();
+
+    private GameFolder(string root, string data)
+    {
+        Root = root;
+        Data = data;
+    }
+
+    /// <summary>Where the build kit is: a release's <c>files\source\</c>, else the repository itself.</summary>
+    public string SourceRoot =>
+        Directory.Exists(Path.Combine(Data, "source", "tools")) ? Path.Combine(Data, "source") : Data;
+
+    /// <summary>A release's own Python (<c>files\python\python.exe</c>), else the one on PATH.</summary>
+    public string PythonExe =>
+        File.Exists(Path.Combine(Data, "python", "python.exe")) ? Path.Combine(Data, "python", "python.exe") : "python";
+
+    public string SetupScript => Path.Combine(SourceRoot, "tools", "setup_game.py");
+
+    /// <summary>First run: no game files from a disc yet, or no game program built from them.</summary>
+    public bool NeedsSetup => !HasGame || GameExe == null;
+
+    public double FreeSpaceGb
+    {
+        get
+        {
+            try { return new DriveInfo(Path.GetPathRoot(Root)!).AvailableFreeSpace / 1e9; }
+            catch { return -1; }
+        }
+    }
+
+    /// <summary>Is it the right disc (Ben 10: Protector of Earth, USA v1.01)? Null = yes, else why not.</summary>
+    public async Task<string?> CheckDiscAsync(string disc)
+    {
+        var start = PythonStart(Path.Combine(SourceRoot, "tools", "prepare_disc.py"), "--check", disc);
+        try
+        {
+            using var process = Process.Start(start)!;
+            var output = await process.StandardOutput.ReadToEndAsync();
+            var errors = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            if (process.ExitCode == 0 && output.Contains("ok SLUS-21661"))
+                return null;
+            var why = (errors.Trim().Split('\n').LastOrDefault() ?? "").Trim();
+            return why.Length > 0 ? L.T(why) : L.T("This file couldn't be read as a disc.");
+        }
+        catch (Exception ex)
+        {
+            return L.F("Couldn't check the disc: {0}", ex.Message);
+        }
+    }
+
+    /// <summary>The setup (tools\setup_game.py): its output comes line by line on standard output.</summary>
+    public ProcessStartInfo SetupStart(string? disc) =>
+        disc == null ? PythonStart(SetupScript, "--data", Data) : PythonStart(SetupScript, "--data", Data, "--disc", disc);
+
+    /// <summary>The setup again after a release's files were copied in by hand (--after-copy: with no record of what the
+    /// game was last built from, it is all built afresh).</summary>
+    public ProcessStartInfo RebuildAfterCopyStart() => PythonStart(SetupScript, "--data", Data, "--after-copy");
+
+    /// <summary>A build's log, every attempt kept one after another under a line with its date (a failed try is still
+    /// there when the next one works). Past 20 MB it starts afresh.</summary>
+    public static StreamWriter OpenRunLog(string path)
+    {
+        var fresh = !File.Exists(path) || new FileInfo(path).Length > 20_000_000;
+        var log = new StreamWriter(path, append: !fresh) { AutoFlush = true };
+        if (!fresh)
+            log.WriteLine();
+        log.WriteLine($"===== {DateTime.Now:yyyy-MM-dd HH:mm:ss}, version {Updater.CurrentText} =====");
+        return log;
+    }
+
+    private ProcessStartInfo PythonStart(string script, params string[] args)
+    {
+        var start = new ProcessStartInfo(PythonExe)
+        {
+            WorkingDirectory = SourceRoot,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8,
+        };
+        start.ArgumentList.Add("-u");
+        start.ArgumentList.Add("-I");
+        start.ArgumentList.Add(script);
+        foreach (var arg in args)
+            start.ArgumentList.Add(arg);
+        start.Environment["PYTHONIOENCODING"] = "utf-8";
+        return start;
+    }
+
+    /// <summary>Shortcuts, with the logo (this program's icon). Always: in a player's install folder the game's, beside
+    /// this program (the game itself lives in <c>files\</c>). With <paramref name="desktop"/>: on the desktop (or
+    /// <paramref name="folder"/>) the game's and this program's. Returns what went wrong, or null.</summary>
+    public string? CreateShortcuts(bool desktop, string? folder = null)
+    {
+        var settings = Environment.ProcessPath ?? Path.Combine(Root, LauncherName + ".exe");
+        try
+        {
+            if (GameExe is { } exe && Data != Root)
+                Shortcut(Path.Combine(Root, "Ben 10 Recomp.lnk"), exe, Data, settings, PlayArguments);
+        }
+        catch (Exception ex)
+        {
+            return L.F("Couldn't make the game's shortcut in this folder: {0}", ex.Message);
+        }
+        if (!desktop)
+            return null;
+        try
+        {
+            var where = folder ?? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            if (GameExe is { } exe)
+                Shortcut(Path.Combine(where, "Ben 10 Recomp.lnk"), exe, Data, settings, PlayArguments);
+            Shortcut(Path.Combine(where, LauncherName + ".lnk"), settings, Root, settings);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return L.F("Couldn't make the desktop shortcuts: {0}", ex.Message);
+        }
+    }
+
+    /// <summary>The game's command line: the executable from the disc.</summary>
+    public string PlayArguments => $"\"{ElfPath}\"";
+
+    private static void Shortcut(string link, string target, string startIn, string icon, string arguments = "")
+    {
+        var type = Type.GetTypeFromProgID("WScript.Shell") ?? throw new InvalidOperationException("no WScript.Shell");
+        dynamic shell = Activator.CreateInstance(type)!;
+        dynamic shortcut = shell.CreateShortcut(link);
+        shortcut.TargetPath = target;
+        shortcut.Arguments = arguments;
+        shortcut.WorkingDirectory = startIn;
+        shortcut.IconLocation = icon + ",0";
+        shortcut.Save();
+    }
+
+    /// <summary>The game's program names (a player's install, a developer build); one running = PLAY is off, so two
+    /// copies never share the memory card.</summary>
+    private static readonly string[] GameProcessNames = { "Ben 10 Recomp", "ps2EntryRunner" };
+
+    public static string AlreadyRunning => L.T("The game is already running.");
+
+    public static bool IsGameRunning() =>
+        GameProcessNames.Any(name =>
+        {
+            var found = Process.GetProcessesByName(name);
+            foreach (var p in found)
+                p.Dispose();
+            return found.Length > 0;
+        });
+
+    public static GameFolder Find()
+    {
+        var chosen = Environment.GetEnvironmentVariable("BEN10_ROOT");
+        if (!string.IsNullOrEmpty(chosen) && Directory.Exists(chosen))
+            return At(Path.GetFullPath(chosen));
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        {
+            var files = Path.Combine(dir.FullName, DataFolder);
+            if (Directory.Exists(Path.Combine(files, "source", "tools")) || File.Exists(Path.Combine(files, "game", "SLUS_216.61")))
+                return new GameFolder(dir.FullName, files); // a player's install
+            if (File.Exists(Path.Combine(dir.FullName, "tools", "setup_game.py")) &&
+                Directory.Exists(Path.Combine(dir.FullName, "launcher")))
+                return new GameFolder(dir.FullName, dir.FullName); // the repository
+        }
+        return At(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar));
+    }
+
+    private static GameFolder At(string folder)
+    {
+        var files = Path.Combine(folder, DataFolder);
+        return new GameFolder(folder, Directory.Exists(files) ? files : folder);
+    }
+
+    /// <summary>Starts the game. Returns why it couldn't, or null with <paramref name="game"/> = the process that ends
+    /// when the game does.</summary>
+    public string? Play(out Process? game)
+    {
+        game = null;
+        if (GameExe is not { } exe)
+            return L.T("The game isn't built yet.");
+        if (!HasGame)
+            return L.F("The game's files from your disc aren't here ({0}).", ElfPath);
+        if (IsGameRunning())
+            return AlreadyRunning;
+        Directory.CreateDirectory(LogsPath);
+        // started directly, as a shortcut does: the game writes its own logs\game.log and game.log.err beside it (it has
+        // no console). It used to be started through cmd.exe for the log, and from there Windows left it behind this
+        // program: in fullscreen it then couldn't take the screen over. This program was just clicked, so it may let
+        // the game come to the front.
+        AllowSetForegroundWindow(AsfwAny);
+        var start = new ProcessStartInfo(exe, PlayArguments)
+        {
+            WorkingDirectory = Data,
+            UseShellExecute = true,
+        };
+        game = Process.Start(start);
+        return null;
+    }
+
+    private const int AsfwAny = -1;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(int processId);
+
+    /// <summary>A folder (made first when missing), a file or a web page, opened by Windows. Never throws: a button
+    /// that can't open something must not close the program.</summary>
+    public static void Open(string pathOrUrl)
+    {
+        try
+        {
+            if (!pathOrUrl.StartsWith("http") && !Directory.Exists(pathOrUrl) && !File.Exists(pathOrUrl))
+                Directory.CreateDirectory(pathOrUrl);
+            Process.Start(new ProcessStartInfo(pathOrUrl) { UseShellExecute = true });
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    /// <summary>A text file in Notepad (LICENSE has no extension for Windows to go by). Never throws.</summary>
+    public static void OpenText(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                Process.Start(new ProcessStartInfo("notepad.exe", $"\"{path}\"") { UseShellExecute = true });
+        }
+        catch (Exception)
+        {
+        }
+    }
+}

@@ -1,0 +1,623 @@
+# A player's first-run setup, step by step (run by the launcher; also by hand):
+#   python -I tools/setup_game.py --data <install folder> [--disc <disc.iso>]
+# 1. the disc -> disc/ + game/ in the install folder, 2. Microsoft's C++ build tools (installed when missing: one
+# Windows prompt), 3. PS2Recomp's recompiler, 4. the game's code -> C++, 5. the game, 6. the graphics card's shaders,
+# 7. "Ben 10 Recomp.exe" in the install folder. The build folders are build/recomp and build/game there.
+# Adapted from def-jam-vendetta-recomp's tools/setup_game.py (GPL-3.0).
+#
+# What it prints for a program to follow (each on its own line, besides everything the tools print):
+#   [step] <n> <of> <title>    [progress] <0-1 within the step>    [done]    [error] <what went wrong>
+#   [detail] <a line of the tool's own error, shown under the [error] line; they come just before it>
+# The libraries PS2Recomp's CMake would clone with git come with a release (source/deps/<name>), so no git is needed.
+import argparse
+import collections
+import ctypes
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+
+SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PS2RECOMP = os.path.join(SRC, 'third_party', 'PS2Recomp')
+GAME_EXE = 'Ben 10 Recomp.exe'
+MANIFEST = 'release-manifest.txt'
+BUILT_FROM = os.path.join('build', 'built-from-manifest.txt')
+VS_INSTALLER_URL = 'https://aka.ms/vs/17/release/vs_BuildTools.exe'
+VS_COMPONENTS = ['Microsoft.VisualStudio.Workload.VCTools', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+                 'Microsoft.VisualStudio.Component.VC.CMake.Project', 'Microsoft.VisualStudio.Component.Windows11SDK.22621']
+# FetchContent name -> the folder a release brings it in (source/deps/<folder>)
+DEPS = {'ELFIO': 'elfio', 'TOML11': 'toml11', 'FMT': 'fmt', 'LIBDWARF': 'libdwarf', 'RABBITIZER': 'rabbitizer',
+        'RAYLIB': 'raylib', 'IMGUI': 'imgui', 'RLIMGUI': 'rlimgui', 'NLOHMANN_JSON': 'nlohmann_json'}
+STEPS = ['Your disc', 'Build tools', 'The recompiler', 'Recompiling the game', 'Building the game',
+         'Preparing graphics', 'Finishing']
+
+
+def say(text):
+    print(text, flush=True)
+
+
+current_step = 0
+
+
+def step(n, title):
+    global current_step
+    current_step = n
+    say(f'[step] {n} {len(STEPS)} {title}')
+
+
+def progress(fraction):
+    say(f'[progress] {max(0.0, min(1.0, fraction)):.3f}')
+
+
+class SetupError(Exception):
+    def __init__(self, message, details=()):
+        super().__init__(message)
+        self.details = list(details)  # the tool's own error lines
+
+
+# the lines of a failed tool's output worth showing a player (the compiler's, the linker's, CMake's, Ninja's errors;
+# the compiler's and linker's codes, C1060 / LNK1104, too, for build tools in another language)
+ERROR_LINE = re.compile(r'\berror\b|\bfatal\b|^FAILED:|CMake Error|cannot open|out of (heap|memory)|Permission denied'
+                        r'|\b(C|LNK)\d{4}\b', re.IGNORECASE)
+# what a few well known errors mean, in plain words
+KNOWN_ERRORS = [
+    (re.compile(r'C1060|C1002|C3859|out of (heap|memory)|not enough (memory|space)|insufficient memory', re.IGNORECASE),
+     'Your PC ran out of memory while building. Close other programs (browsers, games) and try again.'),
+    (re.compile(r'LNK1104|LNK1201|Permission denied|being used by another process', re.IGNORECASE),
+     "Another program held one of the build's files, often an antivirus. Try again."),
+    (re.compile(r'C1001|internal compiler error', re.IGNORECASE),
+     "Microsoft's C++ compiler crashed: your build tools may be too old. Open the Visual Studio Installer, update "
+     '"Build Tools 2022", then run the setup again.'),
+    (re.compile(r'is not a full path to an existing compiler tool', re.IGNORECASE),
+     "The build folder was set up with build tools that are no longer on this PC. Delete the folder files\\build in "
+     'the install folder, then run the setup again.'),
+    (re.compile(r'still dirty after|system time is not set', re.IGNORECASE),
+     "Some files are dated in the future. Check that your PC's date, time and time zone are right, then try again."),
+]
+
+
+def exit_meaning(code):
+    """What a program's exit code means, in plain words, when it is a crash a player can act on."""
+    if code & 0xFFFFFFFF == 0xC000001D:  # STATUS_ILLEGAL_INSTRUCTION
+        return ('. It used an instruction your processor does not have. Please report it with the name of your '
+                'processor (Settings > System > About)')
+    return ''
+
+
+def error_details(lines, keep=6, width=240):
+    """The last few error lines of a tool's output (or its last lines, when none look like errors)."""
+    picked = [line for line in lines if ERROR_LINE.search(line)] or list(lines)
+    return [line.strip()[:width] for line in picked[-keep:] if line.strip()]
+
+
+def run(cmd, env=None, cwd=None, parse=None, log_name=None):
+    """Runs a command, passing its lines on (and to parse(line) for progress)."""
+    say('> ' + ' '.join(f'"{c}"' if ' ' in c else c for c in cmd))
+    if env and not os.path.isabs(cmd[0]):
+        # Windows looks a program up on this process's PATH, not env's: find cmake / ninja on the build tools' PATH
+        found = shutil.which(cmd[0], path=env.get('PATH', env.get('Path', '')))
+        if found:
+            cmd = [found] + cmd[1:]
+    proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, encoding='utf-8', errors='replace', bufsize=1)
+    last = collections.deque(maxlen=400)
+    for line in proc.stdout:
+        line = line.rstrip()
+        print(line, flush=True)
+        last.append(line)
+        if parse:
+            parse(line)
+    if proc.wait() != 0:
+        raise SetupError(f'{os.path.basename(cmd[0])} failed (exit code {proc.returncode})'
+                         + (f'; see {log_name}' if log_name else '') + exit_meaning(proc.returncode),
+                         error_details(last))
+
+
+# --- 1. the build tools ---------------------------------------------------------------------------------------------
+# The compiler must be at least MIN_MSVC: older ones stop with an internal compiler error (C1001) on some of the game's
+# recompiled files (MSVC 19.35, Build Tools 17.5, does on two: GitHub issue #7); 19.44 (Build Tools 17.14) is the one
+# the game is built and tested with. The Windows SDK is needed too (its resource compiler, rc, and headers). An older or
+# incomplete Build Tools 2022 is updated and given what is missing by Microsoft's installer; any other install (a full
+# Visual Studio, the 2019 tools) gets a Build Tools 2022 of its own beside it.
+MIN_MSVC = (19, 44)
+BUILD_TOOLS_2022 = 'Microsoft.VisualStudio.Product.BuildTools'
+
+
+def vswhere():
+    path = os.path.join(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)'),
+                        'Microsoft Visual Studio', 'Installer', 'vswhere.exe')
+    return path if os.path.isfile(path) else None
+
+
+def find_install():
+    """The newest install with the C++ tools: {'path', 'product', 'version', 'vcvars'}, or None."""
+    tool = vswhere()
+    if not tool:
+        return None
+    out = subprocess.run([tool, '-latest', '-products', '*', '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+                          '-format', 'value', '-property', 'installationPath'], capture_output=True, text=True).stdout
+    for install in out.strip().splitlines():
+        install = install.strip()
+        vcvars = os.path.join(install, 'VC', 'Auxiliary', 'Build', 'vcvars64.bat')
+        if not os.path.isfile(vcvars):
+            continue
+
+        def prop(name):
+            got = subprocess.run([tool, '-path', install, '-format', 'value', '-property', name],
+                                 capture_output=True, text=True).stdout.strip().splitlines()
+            return got[0].strip() if got else ''
+        return {'path': install, 'product': prop('productId'), 'version': prop('installationVersion'), 'vcvars': vcvars}
+    return None
+
+
+def find_vcvars():
+    found = find_install()
+    return found['vcvars'] if found else None
+
+
+def build_environment(vcvars):
+    """The environment vcvars64.bat sets (the compiler, the Windows SDK, and VS's CMake / Ninja on PATH)."""
+    out = subprocess.run(f'cmd /s /c ""{vcvars}" >nul && set"', capture_output=True, text=True, shell=True).stdout
+    env = {}
+    for line in out.splitlines():
+        if '=' in line:
+            key, _, value = line.partition('=')
+            env[key] = value
+    if 'INCLUDE' not in env:
+        raise SetupError('the build tools did not set up (vcvars64.bat)')
+    return env
+
+
+def has_tools(env):
+    path = env.get('PATH', env.get('Path', ''))
+    return all(shutil.which(tool, path=path) for tool in ('cl', 'cmake', 'ninja'))
+
+
+def compiler_version(env):
+    """The C++ compiler's version, (19, 44, 35229), from the banner cl prints; None when it can't be run. The banner is
+    in the build tools' language ("Version 19.44.35219" in English, translated in Portuguese, the number before the
+    word in Chinese: GitHub issue #8), so only its numbers are read: the first three dotted ones are the version."""
+    cl = shutil.which('cl', path=env.get('PATH', env.get('Path', '')))
+    if not cl:
+        return None
+    try:
+        out = subprocess.run([cl], env=env, capture_output=True, text=True, errors='replace', timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        say(f'[tools] {cl} could not be started: {error}')
+        return None
+    banner = out.stdout + out.stderr
+    m = re.search(r'\b(\d+)\.(\d+)\.(\d+)\b', banner)
+    if not m:
+        say(f'[tools] {cl} (exit code {out.returncode}) printed: ' + ' | '.join(banner.strip().splitlines()[:4]))
+        return None
+    return tuple(int(x) for x in m.groups())
+
+
+def has_sdk(env):
+    """The Windows SDK the build needs: its resource compiler (rc) on PATH and its headers on INCLUDE."""
+    path = env.get('PATH', env.get('Path', ''))
+    return bool(shutil.which('rc', path=path)) and 'windows kits' in env.get('INCLUDE', '').lower()
+
+
+def tools_problem(env):
+    """What is wrong with these build tools, in plain words; None when they are fine."""
+    if not env or not has_tools(env):
+        return "Microsoft's C++ build tools are missing"
+    version = compiler_version(env)
+    if version is None:
+        return "the C++ compiler in Microsoft's build tools could not be run"
+    if version[:2] < MIN_MSVC:
+        shown = '.'.join(map(str, version))
+        return (f"your C++ build tools are too old (the compiler is version {shown}; "
+                f"{'.'.join(map(str, MIN_MSVC))} or newer is needed)")
+    if not has_sdk(env):
+        return 'the Windows SDK is missing from your C++ build tools'
+    return None
+
+
+def run_installer(args, what):
+    """Microsoft's Build Tools installer (downloaded each time: always its newest) with these arguments."""
+    say(f"{what}: downloading Microsoft's installer (free; a Windows prompt asks to allow it)")
+    installer = os.path.join(tempfile.gettempdir(), 'vs_BuildTools.exe')
+    with urllib.request.urlopen(VS_INSTALLER_URL) as response, open(installer, 'wb') as out:
+        shutil.copyfileobj(response, out)
+    cmd = [installer] + args
+    say('> ' + ' '.join(cmd))
+    code = subprocess.run(cmd).returncode
+    if code not in (0, 3010):  # 3010: done, a restart recommended
+        raise SetupError(f"Microsoft's installer stopped (exit code {code})")
+
+
+def adds():
+    out = []
+    for component in VS_COMPONENTS:
+        out += ['--add', component]
+    return out
+
+
+def install_build_tools(why):
+    run_installer(['--passive', '--wait', '--norestart'] + adds(), why)
+
+
+def update_build_tools(install, why):
+    """An existing Build Tools 2022 brought up to date, then given every component the build needs (the SDK)."""
+    run_installer(['update', '--installPath', install, '--passive', '--wait', '--norestart'], why + ': updating them')
+    run_installer(['modify', '--installPath', install, '--passive', '--wait', '--norestart'] + adds(),
+                  'adding what the build needs to them')
+
+
+def step_tools():
+    step(2, STEPS[1])
+    found = find_install()
+    env = build_environment(found['vcvars']) if found else None
+    problem = tools_problem(env)
+    if problem:
+        say(f'[tools] {problem}' + (f" ({found['path']}, {found['version']})" if found else ''))
+        if found and found['product'] == BUILD_TOOLS_2022 and found['version'].startswith('17.') and env and has_tools(env):
+            update_build_tools(found['path'], problem)
+        else:
+            install_build_tools(problem)
+        progress(0.9)
+        found = find_install()
+        env = build_environment(found['vcvars']) if found else None
+        problem = tools_problem(env)
+        if problem:
+            raise SetupError(problem + ' after Microsoft\'s installer. Open the Visual Studio Installer, update '
+                             '"Build Tools 2022" and tick "Desktop development with C++" (with its Windows 11 SDK), '
+                             'then run the setup again')
+    version = '.'.join(map(str, compiler_version(env)))
+    say(f"build tools: {found['vcvars']} (the compiler {version}, the Windows SDK {env.get('WindowsSDKVersion', '').strip(chr(92))})")
+    progress(1.0)
+    return env
+
+
+# --- 2. the disc ----------------------------------------------------------------------------------------------------
+
+def step_disc(data, disc):
+    step(1, STEPS[0])
+    elf = os.path.join(data, 'game', 'SLUS_216.61')
+    iso = os.path.join(data, 'disc', 'SLUS-21661.iso')
+    if not disc:
+        if os.path.isfile(elf) and os.path.isfile(iso) and os.path.isdir(os.path.join(data, 'game', 'MODULES')):
+            say('the disc is already prepared')
+            progress(1.0)
+            return
+        raise SetupError('no disc chosen')
+    env = dict(os.environ, BEN10_DATA=data)
+
+    def parse(line):
+        m = re.match(r'(\d+)/(\d+) sectors', line)
+        if m:
+            progress(0.9 * int(m.group(1)) / max(1, int(m.group(2))))
+    run([sys.executable, '-I', os.path.join(SRC, 'tools', 'prepare_disc.py'), disc], env=env, parse=parse)
+    if not os.path.isfile(elf):
+        raise SetupError('the disc was read but SLUS_216.61 is missing')
+    progress(1.0)
+
+
+# --- 3-5. building ----------------------------------------------------------------------------------------------------
+
+def deps_args():
+    args = []
+    for name, folder in DEPS.items():
+        path = os.path.join(SRC, 'deps', folder)
+        if os.path.isdir(path):
+            args.append(f'-DFETCHCONTENT_SOURCE_DIR_{name}={path}')
+    return args
+
+
+def processor_arch():
+    """The instruction set to build for, from this PC's processor: AVX2 where it has it, else x64's own baseline. A
+    program built for AVX2 stops at once on a processor without it (exit code 0xC000001D, an illegal instruction)."""
+    PF_AVX2_INSTRUCTIONS_AVAILABLE = 40
+    try:
+        avx2 = bool(ctypes.windll.kernel32.IsProcessorFeaturePresent(PF_AVX2_INSTRUCTIONS_AVAILABLE))
+    except (AttributeError, OSError):
+        avx2 = False
+    say(f"this PC's processor: {'AVX2' if avx2 else 'no AVX2'}")
+    return 'AVX2' if avx2 else ''
+
+
+def build_jobs():
+    """Parallel compiles: the cores, but about one per 3 GB of memory and one per 2 GB of commit free right now (the
+    game's big files need ~2 GB each, and a browser or a game left open leaves less than the PC has). Commit (memory +
+    page file) is what runs out when the compiler stops with "out of heap space" (C1060); short of physical memory it
+    only pages."""
+    class Status(ctypes.Structure):
+        _fields_ = [('length', ctypes.c_ulong), ('load', ctypes.c_ulong), ('total', ctypes.c_ulonglong),
+                    ('free', ctypes.c_ulonglong), ('pagetotal', ctypes.c_ulonglong), ('pagefree', ctypes.c_ulonglong),
+                    ('virtualtotal', ctypes.c_ulonglong), ('virtualfree', ctypes.c_ulonglong), ('extended', ctypes.c_ulonglong)]
+    status = Status()
+    status.length = ctypes.sizeof(Status)
+    total_gb, free_gb = 8, 8
+    if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        total_gb, free_gb = status.total / (1 << 30), status.pagefree / (1 << 30)
+    jobs = max(1, min(os.cpu_count() or 2, int(total_gb // 3), int(free_gb // 2)))
+    say(f'{jobs} compiles at a time ({total_gb:.0f} GB of memory, {free_gb:.0f} GB of commit free)')
+    return jobs
+
+
+def build_with_retry(build_dir, env, start, end):
+    """cmake --build, with progress from start to end within the step. When it fails it is tried once more with one
+    or two compiles at a time: Ninja carries on from where it stopped, and with little running at once a PC short on
+    memory gets through, as does a file an antivirus held for a moment. A real error fails again quickly."""
+    at = [start]
+
+    def parse(line):
+        m = re.match(r'\[(\d+)/(\d+)\]', line)
+        if m:  # Ninja counts what is left: the second try continues the bar from where the first one stopped
+            at[0] = max(at[0], first + (end - first) * int(m.group(1)) / max(1, int(m.group(2))))
+            progress(at[0])
+
+    jobs = build_jobs()
+    first = start
+    try:
+        run(['cmake', '--build', build_dir, '--', f'-j{jobs}'], env=env, parse=parse)
+    except SetupError as error:
+        retry_jobs = 1 if jobs <= 2 else 2
+        say(f'[retry] The build stopped ({error}). Trying again with {retry_jobs} at a time')
+        for line in error.details:
+            say(f'  {line}')
+        time.sleep(5)
+        first = at[0]
+        run(['cmake', '--build', build_dir, '--', f'-j{retry_jobs}'], env=env, parse=parse)
+
+
+def fix_future_dates(folder):
+    """Files dated in the future are dated now. A zip keeps a file's time with no time zone, so a release zipped in the
+    evening by a UK clock unzips in the USA with files hours in the future (and a wrong clock does the same): CMake
+    sees them newer than the build it just set up, and Ninja stops with "manifest 'build.ninja' still dirty after 100
+    tries"."""
+    now = time.time()
+    fixed = 0
+    for root, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if d not in ('.git', 'out', 'bin', 'obj')]
+        for name in files:
+            path = os.path.join(root, name)
+            try:
+                st = os.stat(path)
+                if st.st_mtime > now + 60:
+                    os.utime(path, (st.st_atime, now))
+                    fixed += 1
+            except OSError:
+                pass
+    if fixed:
+        say(f'{fixed} files were dated in the future: dated now')
+
+
+def cached_compiler(build):
+    """The C++ compiler a build folder was configured with (CMakeCache.txt's CMAKE_CXX_COMPILER), or None."""
+    try:
+        with open(os.path.join(build, 'CMakeCache.txt'), encoding='utf-8', errors='replace') as f:
+            for line in f:
+                m = re.match(r'CMAKE_CXX_COMPILER:[A-Z]+=(.+)', line.strip())
+                if m:
+                    return m.group(1).strip()
+    except OSError:
+        pass
+    return None
+
+
+def fresh_if_compiler_changed(build, env):
+    """A build folder configured with a compiler that is gone or isn't the one the build tools give now: emptied, so
+    CMake configures it afresh (it never looks for the compiler again once it has written one down)."""
+    old = cached_compiler(build)
+    if not old:
+        return
+    now = shutil.which('cl', path=env.get('PATH', env.get('Path', '')))
+    same = now and os.path.normcase(os.path.normpath(old)) == os.path.normcase(os.path.normpath(now))
+    if same and os.path.isfile(old):
+        return
+    why = 'is gone' if not os.path.isfile(old) else f'is not the one in use now ({now})'
+    say(f'{os.path.basename(build)}: it was set up with the compiler {old}, which {why}: building it afresh')
+    shutil.rmtree(build, ignore_errors=True)
+    if os.path.exists(os.path.join(build, 'CMakeCache.txt')):
+        raise SetupError(f'the old build folder {build} could not be removed (a program may be using it). Close the '
+                         'game and the settings program\'s other windows, delete that folder, then run the setup again')
+
+
+def step_recompiler(env, data, arch):
+    step(3, STEPS[2])
+    build = os.path.join(data, 'build', 'recomp')
+    fresh_if_compiler_changed(build, env)
+    run(['cmake', '-S', PS2RECOMP, '-B', build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DPS2X_BUILD_RUNTIME=OFF',
+         '-DPS2X_BUILD_TEST=OFF', '-DPS2X_BUILD_STUDIO=OFF', '-DPS2X_BUILD_ANALYZER=OFF',
+         f'-DPS2X_MSVC_ARCH={arch}'] + deps_args(), env=env)
+    progress(0.1)
+    build_with_retry(build, env, 0.1, 1.0)
+    exe = os.path.join(build, 'ps2xRecomp', 'ps2_recomp.exe')
+    if not os.path.isfile(exe):
+        raise SetupError('the recompiler was not built')
+    progress(1.0)
+    return exe
+
+
+def sync_progress(start, end):
+    """sync_generated.py's "checked N of T" lines, as progress within the step."""
+    def parse(line):
+        m = re.match(r'checked ([\d,]+) of ([\d,]+)', line)
+        if m:
+            done, total = (int(g.replace(',', '')) for g in m.groups())
+            progress(start + (end - start) * done / max(1, total))
+    return parse
+
+
+def step_recompile(recompiler, data):
+    step(4, STEPS[3])
+    env = dict(os.environ, BEN10_DATA=data)
+    logs = os.path.join(data, 'logs')
+    os.makedirs(logs, exist_ok=True)
+    # where the time goes (an update, 2026-10-12): the recompiler ~0.5 min, the file comparison ~6 min
+    run([sys.executable, '-I', os.path.join(SRC, 'tools', 'make_config.py')], env=env, cwd=SRC)
+    progress(0.02)
+    say("Turning the game's code into C++")
+    log = os.path.join(logs, 'recomp.log')
+    say(f'> {recompiler} config/ben10.toml (its output: {log})')
+    with open(log, 'w', encoding='utf-8', errors='replace') as out:
+        code = subprocess.run([recompiler, os.path.join(SRC, 'config', 'ben10.toml')], cwd=SRC, env=env,
+                              stdout=out, stderr=subprocess.STDOUT).returncode
+    if code != 0:
+        raise SetupError(f'the recompiler failed (exit code {code}); see {log}' + exit_meaning(code))
+    progress(0.15)
+    run([sys.executable, '-I', os.path.join(SRC, 'tools', 'vu1_recomp.py')], env=env, cwd=SRC)
+    progress(0.18)
+    run([sys.executable, '-I', os.path.join(SRC, 'tools', 'sync_generated.py')], env=env, cwd=SRC,
+        parse=sync_progress(0.18, 1.0))
+    progress(1.0)
+
+
+def step_game(env, data, arch):
+    step(5, STEPS[4])
+    build = os.path.join(data, 'build', 'game')
+    fresh_if_compiler_changed(build, env)
+    # the same build as tools/build.ps1, for this PC's processor
+    cxx_flags = '/O2 /Ob1 /DNDEBUG' + (f' /arch:{arch}' if arch else '')
+    run(['cmake', '-S', PS2RECOMP, '-B', build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
+         f'-DCMAKE_CXX_FLAGS_RELWITHDEBINFO={cxx_flags}', '-DCMAKE_C_FLAGS_RELWITHDEBINFO=/O2 /DNDEBUG',
+         f'-DPS2X_MSVC_ARCH={arch}',
+         '-DCMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO=/INCREMENTAL:NO /DEBUG /OPT:REF /OPT:ICF /STACK:268435456',
+         '-DPS2X_BUILD_RECOMP=OFF', '-DPS2X_ENABLE_SCCACHE=OFF',
+         '-DPS2X_BUILD_TEST=OFF', '-DPS2X_BUILD_STUDIO=OFF', '-DPS2X_BUILD_ANALYZER=OFF', '-DPS2X_ENABLE_AGRESSIVE_LOGS=OFF',
+         '-DPS2X_SHOW_WINDOWS_CONSOLE=OFF',  # a windowed program: no terminal behind the game (its output: logs\)
+         f'-DPS2X_PARALLEL_GS_DIR={os.path.join(SRC, "third_party", "parallel-gs")}',
+         f'-DPS2X_WINDOW_ICON={os.path.join(SRC, "launcher", "Assets", "icon.ico")}',  # the logo on the window
+         # double-click the game: it finds game/SLUS_216.61 beside itself (main.cpp) and disc/ beside game/
+         '-DPS2X_DEFAULT_BOOT_ELF=game/SLUS_216.61'] + deps_args(), env=env)
+    progress(0.03)
+    build_with_retry(build, env, 0.03, 1.0)
+    progress(1.0)
+    return os.path.join(build, 'ps2xRuntime')
+
+
+def read_manifest(path):
+    """release-manifest.txt: "sha256 size path" lines (paths below the install folder, with /), # comments."""
+    files = {}
+    with open(path, encoding='utf-8') as f:
+        for line in f:
+            parts = line.rstrip('\n').split(' ', 2)
+            if len(parts) == 3 and not line.startswith('#') and '..' not in parts[2]:
+                files[parts[2]] = parts[0]
+    return files
+
+
+def mark_changed_files(data, after_copy):
+    """Files that differ from the release the game was last built from are dated now, so the build sees them."""
+    manifest = os.path.join(data, MANIFEST)
+    built_from = os.path.join(data, BUILT_FROM)
+    if not os.path.isfile(manifest):
+        return  # a developer's copy: git and the build's own dates
+    if not os.path.isfile(built_from):
+        if after_copy:
+            for folder in ('game', 'recomp'):
+                shutil.rmtree(os.path.join(data, 'build', folder), ignore_errors=True)
+            say('no record of what the game was last built from: building it all afresh')
+        return
+    old, new = read_manifest(built_from), read_manifest(manifest)
+    root = os.path.dirname(data)
+    now = time.time()
+    marked = 0
+    for rel, digest in new.items():
+        path = os.path.join(root, *rel.split('/'))
+        if old.get(rel) != digest and os.path.isfile(path):
+            os.utime(path, (now, now))
+            marked += 1
+    if marked:
+        say(f'{marked} files changed since the game was last built: marked as changed')
+
+
+def install_game(out_dir, data):
+    """The built game program and its DLLs put in their place beside the game files."""
+    exe = os.path.join(out_dir, 'ps2EntryRunner.exe')
+    if not os.path.isfile(exe):
+        raise SetupError('the game was not built')
+    # each copied beside its place first, then swapped in: an update's rebuild replaces the game only once it is all here
+    files = [(exe, GAME_EXE)] + [(os.path.join(out_dir, name), name) for name in os.listdir(out_dir)
+                                  if name.lower().endswith('.dll')]  # the DLLs it needs (ffmpeg)
+    for source, name in files:
+        shutil.copyfile(source, os.path.join(data, name + '.new'))
+    for _, name in files:
+        os.replace(os.path.join(data, name + '.new'), os.path.join(data, name))
+
+
+def step_graphics(data):
+    """The graphics card's pipelines built now and kept in graphics-cache.bin beside the game, so its first start
+    doesn't build them (a couple of minutes). Never stops the setup: the game builds them itself when this can't.
+    Run with the game program itself, in its place: the driver only gives the saved pipelines back to the program that
+    saved them (the same build run as the build folder's ps2EntryRunner.exe saved pipelines the game found none of: it
+    built all 10,900 again at its first start)."""
+    step(6, STEPS[5])
+    exe = os.path.join(data, GAME_EXE)
+    env = dict(os.environ)
+    env['VENDETTA_GRAPHICS_CACHE'] = os.path.join(data, 'graphics-cache.bin')
+    # the player's settings (they pick the graphics card) when there are any yet; none on a first install
+    settings = os.path.join(data, 'settings.toml')
+    env['VENDETTA_SETTINGS'] = settings if os.path.isfile(settings) else 'none'
+
+    def parse(line):
+        m = re.match(r'\[prepare\] (\d+) of (\d+)', line)
+        if m and int(m.group(2)):
+            progress(int(m.group(1)) / int(m.group(2)))
+
+    try:
+        run([exe, '--prepare-graphics'], env=env, cwd=data, parse=parse)
+    except SetupError as error:
+        say(f'graphics not prepared ({error}): the game prepares them at its first start')
+    progress(1.0)
+
+
+def step_finish(data):
+    step(7, STEPS[6])
+    # what it was built from: the settings program and the game compare it with the release's files
+    if os.path.isfile(os.path.join(data, MANIFEST)):
+        built_from = os.path.join(data, BUILT_FROM)
+        shutil.copyfile(os.path.join(data, MANIFEST), built_from + '.new')
+        os.replace(built_from + '.new', built_from)
+    say(f'the game: {os.path.join(data, GAME_EXE)}')
+    progress(1.0)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='First-run setup: your disc -> Ben 10 Recomp.exe')
+    parser.add_argument('--data', required=True, help='the install folder (disc/, game/, the game program, build/)')
+    parser.add_argument('--disc', help='your disc: .iso (USA, SLUS-21661 v1.01)')
+    parser.add_argument('--after-copy', action='store_true',
+                        help="a release's files were copied in by hand: with no record of the last build, build afresh")
+    args = parser.parse_args()
+    data = os.path.abspath(args.data)
+    try:
+        step_disc(data, args.disc)
+        mark_changed_files(data, args.after_copy)
+        env = step_tools()
+        fix_future_dates(SRC)
+        arch = processor_arch()
+        recompiler = step_recompiler(env, data, arch)
+        step_recompile(recompiler, data)
+        out_dir = step_game(env, data, arch)
+        install_game(out_dir, data)
+        step_graphics(data)
+        step_finish(data)
+    except SetupError as error:
+        # the step it stopped in, the tool's own error lines, and what they mean when it is a known one
+        where = f'{STEPS[current_step - 1]}: ' if 1 <= current_step <= len(STEPS) else ''
+        message = where + str(error)
+        for pattern, meaning in KNOWN_ERRORS:
+            if any(pattern.search(line) for line in error.details):
+                message += '. ' + meaning
+                break
+        for line in error.details:
+            say(f'[detail] {line}')
+        say(f'[error] {message}')
+        return 1
+    except Exception as error:  # anything unexpected: still a clear last line
+        say(f'[error] {type(error).__name__}: {error}')
+        return 1
+    say('[done]')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -42,3 +42,13 @@ __pycache__/
 docs/*.png
 *.png
 *.jpg
+
+# o launcher: a compilação fica fora; o ícone (arte nossa, tools/make_icon.py) entra
+launcher/bin/
+launcher/obj/
+!launcher/Assets/*.png
+# as telas do launcher no README (arte nossa, sem nada do jogo; launcher --shot)
+!docs/images/launcher-*.png
+
+# o pacote para os jogadores (tools/make_release.py)
+dist/

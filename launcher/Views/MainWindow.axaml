@@ -1,0 +1,80 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Ben10Launcher.ViewModels"
+        xmlns:v="using:Ben10Launcher.Views"
+        xmlns:l="using:Ben10Launcher.Services"
+        x:Class="Ben10Launcher.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="Ben 10 Recomp"
+        Width="1280" Height="760" MinWidth="1060" MinHeight="660"
+        Icon="/Assets/icon.ico"
+        WindowStartupLocation="CenterScreen">
+
+    <Panel>
+        <!-- home: the picture left, PLAY and the pages right (as PL:A Recomp's start screen) -->
+        <Grid ColumnDefinitions="*,2,480" IsVisible="{Binding OnHome}">
+            <Panel ClipToBounds="True">
+                <v:ArtView />
+                <StackPanel Margin="60,64,0,0" VerticalAlignment="Top" HorizontalAlignment="Left">
+                    <TextBlock Classes="brand" Text="BEN 10" FontSize="92" />
+                    <TextBlock Classes="sub" Text="R E C O M P" FontSize="28" Margin="6,0,0,0" />
+                    <TextBlock Text="{l:T 'Ben 10: Protector of Earth, recompiled for PC'}" FontSize="22" Margin="6,26,0,0"
+                               Foreground="#dbe5d6" />
+                </StackPanel>
+                <Border VerticalAlignment="Bottom" Background="#d80b0e0c" Padding="40,16">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="{Binding Status}" FontSize="20" Classes.good="{Binding StatusGood}"
+                                   Classes.warn="{Binding !StatusGood}" />
+                        <TextBlock Text="{Binding Settings.Hardware}" FontSize="17" Foreground="#99a599" />
+                    </StackPanel>
+                </Border>
+            </Panel>
+            <Border Grid.Column="1" Background="{StaticResource VAccent}" Opacity="0.75" />
+            <DockPanel Grid.Column="2" Background="#0f1210">
+                <StackPanel DockPanel.Dock="Bottom" Spacing="10" Margin="44,0,44,28">
+                    <StackPanel Orientation="Horizontal" Spacing="14" IsVisible="{Binding UpdateNotice}">
+                        <TextBlock Text="{Binding UpdateNoticeText}" Foreground="#f0c94c" FontSize="19" VerticalAlignment="Center" />
+                        <Button Classes="small" Content="{l:T Update}" Command="{Binding Updates.ShowNotesCommand}" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding Version}" Foreground="#7d877d" FontSize="17" />
+                    <TextBlock Text="{l:T 'Not affiliated with Cartoon Network or D3Publisher. You need your own copy of the game.'}"
+                               Foreground="#5f685f" FontSize="12.5" TextWrapping="Wrap" />
+                </StackPanel>
+                <StackPanel Spacing="14" Margin="44,64,44,0">
+                    <Button Classes="bigplay" Command="{Binding PlayCommand}" IsEnabled="{Binding CanPlay}">
+                        <TextBlock Text="{l:T PLAY}" FontSize="34" FontWeight="Black" Foreground="#0c1a05" />
+                    </Button>
+                    <Border Height="22" />
+                    <Button Classes="menu" Content="{l:T OPTIONS}" Command="{Binding ShowOptionsCommand}" />
+                    <Button Classes="menu" Content="{l:T CONTROLS}" Command="{Binding ShowControlsCommand}" />
+                    <Button Classes="menu" Content="{l:T 'GAME FILES'}" Command="{Binding ShowGameFilesCommand}" />
+                    <Button Classes="menu" Content="{l:T EXIT}" Command="{Binding ExitCommand}" />
+                </StackPanel>
+            </DockPanel>
+        </Grid>
+
+        <!-- Options, Controls, Game files: a header with Back, the page under it -->
+        <DockPanel IsVisible="{Binding OnPage}">
+            <v:PageHeader DockPanel.Dock="Top" Title="{Binding PageTitle}" BackCommand="{Binding ShowHomeCommand}" />
+            <Panel Margin="44,18,44,22">
+                <v:OptionsView DataContext="{Binding Settings}"
+                               IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).IsOptions}" />
+                <v:ControlsView DataContext="{Binding Settings}"
+                                IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).IsControls}" />
+                <v:GameFilesView IsVisible="{Binding IsGameFiles}" />
+            </Panel>
+        </DockPanel>
+
+        <!-- the first launch's setup -->
+        <DockPanel IsVisible="{Binding InSetup}">
+            <v:PageHeader DockPanel.Dock="Top" Title="{l:T 'First launch'}" />
+            <v:SetupView DataContext="{Binding Setup}" />
+        </DockPanel>
+
+        <!-- an update -->
+        <DockPanel IsVisible="{Binding InUpdate}">
+            <v:PageHeader DockPanel.Dock="Top" Title="{l:T Update}" />
+            <v:UpdateView DataContext="{Binding Updates}" />
+        </DockPanel>
+    </Panel>
+</Window>

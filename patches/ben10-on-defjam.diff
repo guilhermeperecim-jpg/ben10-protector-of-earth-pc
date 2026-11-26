@@ -1,3 +1,165 @@
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.cpp b/ps2xIOP/src/emulator/core/iop_memory.cpp
+index 5e1048c..0ab0b85 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.cpp
++++ b/ps2xIOP/src/emulator/core/iop_memory.cpp
+@@ -434,7 +434,14 @@ namespace ps2x::iop::detail
+                 break;
+         }
+         if (candidate > HeapLimit || size > HeapLimit - candidate)
++        {
++            uint64_t used = 0u;
++            for (const auto &block : m_allocations)
++                used += block.size;
++            std::fprintf(stderr, "[iop-heap] allocation of %u bytes failed: cursor 0x%x, %zu blocks, %llu bytes in use of 0x%x-0x%x\n",
++                         size, m_heapCursor, m_allocations.size(), static_cast<unsigned long long>(used), HeapBase, HeapLimit);
+             return 0u;
++        }
+         m_allocations.push_back({candidate, size});
+         markOwned(candidate, size);
+         m_heapCursor = std::max(m_heapCursor, candidate + size);
+diff --git a/ps2xIOP/src/emulator/core/iop_memory.h b/ps2xIOP/src/emulator/core/iop_memory.h
+index 0296a8e..935123a 100644
+--- a/ps2xIOP/src/emulator/core/iop_memory.h
++++ b/ps2xIOP/src/emulator/core/iop_memory.h
+@@ -24,7 +24,9 @@ namespace ps2x::iop::detail
+         static constexpr uint32_t Spu2End = 0x1FA00000u;
+         static constexpr uint32_t SifBase = 0x1D000000u;
+         static constexpr uint32_t SifEnd = 0x1D001000u;
+-        static constexpr uint32_t HeapBase = 0x00120000u;
++        // modules load from 0x10000 up to here (Ben 10's eight end near 0x58000); the heap was 0x120000 (832 KB), too
++        // small for Ben 10 (ALASD and the game take 850 KB, then the Bink player's 8 KB failed and no movie played)
++        static constexpr uint32_t HeapBase = 0x00080000u;
+         static constexpr uint32_t HeapLimit = 0x001F0000u;
+ 
+         struct Allocation
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index fa9d86b..7528e29 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -972,17 +972,37 @@ namespace ps2x::iop::detail
+             module.entry = loaded.entry;
+             module.gp = loaded.gp;
+ 
+-            uint32_t args = 0u;
++            // start(argc, argv) as the IOP's loadcore calls it: argv[0] = the module's name, then each NUL-separated
++            // string of the load arguments (RAD's Bink sound module in Ben 10 refuses to start unless argc is 3)
++            std::vector<std::string> strings{module.name};
+             if (arguments && argumentSize)
+             {
+-                args = allocate(argumentSize + 1u, 16u);
+-                if (args)
++                const char *text = static_cast<const char *>(arguments);
++                for (uint32_t at = 0u; at < argumentSize;)
+                 {
+-                    writeRam(args, arguments, argumentSize);
+-                    write8(args + argumentSize, 0u);
++                    const uint32_t length = static_cast<uint32_t>(strnlen(text + at, argumentSize - at));
++                    strings.emplace_back(text + at, length);
++                    at += length + 1u;
+                 }
+             }
+-            const uint32_t startResult = callFunction(module.entry, argumentSize, args, 0u, 0u, module.gp);
++            const uint32_t argc = static_cast<uint32_t>(strings.size());
++            uint32_t blockSize = (argc + 1u) * 4u;
++            for (const std::string &s : strings)
++                blockSize += static_cast<uint32_t>(s.size()) + 1u;
++            const uint32_t args = allocate(blockSize, 16u);
++            if (args)
++            {
++                uint32_t text = args + (argc + 1u) * 4u;
++                for (uint32_t i = 0; i < argc; ++i)
++                {
++                    write32(args + i * 4u, text);
++                    writeRam(text, strings[i].data(), strings[i].size());
++                    write8(text + static_cast<uint32_t>(strings[i].size()), 0u);
++                    text += static_cast<uint32_t>(strings[i].size()) + 1u;
++                }
++                write32(args + argc * 4u, 0u);
++            }
++            const uint32_t startResult = callFunction(module.entry, args ? argc : 0u, args, 0u, 0u, module.gp);
+             if (args)
+                 freeAllocation(args);
+             module.resident = startResult == 0u || startResult == 2u;
+@@ -1013,7 +1033,10 @@ namespace ps2x::iop::detail
+         ModuleLoadResult loadModuleBuffer(uint32_t guestAddress, const void *arguments, uint32_t argumentSize)
+         {
+             std::vector<uint8_t> image;
+-            if (!IopModuleLoader::readElfFromGuest(host, guestAddress, image))
++            // the SDK passes an IOP address (the EE copied the module there first, e.g. RAD's Bink sound module in
++            // Ben 10); an EE address still works when nothing valid stands at that IOP address
++            if (!(memory.isRamRange(guestAddress, 4u) && IopModuleLoader::readElfFromIop(memory, guestAddress, image)) &&
++                !IopModuleLoader::readElfFromGuest(host, guestAddress, image))
+                 return {true, -1, -1};
+             std::ostringstream tag;
+             tag << "buffer@0x" << std::hex << guestAddress;
+diff --git a/ps2xIOP/src/emulator/services/iop_module_loader.cpp b/ps2xIOP/src/emulator/services/iop_module_loader.cpp
+index 80e59d6..46dfe23 100644
+--- a/ps2xIOP/src/emulator/services/iop_module_loader.cpp
++++ b/ps2xIOP/src/emulator/services/iop_module_loader.cpp
+@@ -1,3 +1,4 @@
++#include <functional>
+ #include "iop_module_loader.h"
+ 
+ #include "../core/iop_memory.h"
+@@ -320,10 +321,13 @@ namespace ps2x::iop::detail
+         return ok;
+     }
+ 
+-    bool IopModuleLoader::readElfFromGuest(IopHost &host, uint32_t guestAddress, std::vector<uint8_t> &bytes)
++    // An ELF image at an address, read through `read` (EE guest memory or IOP RAM): the header, then every section
++    // and program segment it names.
++    static bool readElfWith(const std::function<bool(uint32_t, void *, size_t)> &read, uint32_t guestAddress,
++                            std::vector<uint8_t> &bytes)
+     {
+         Elf32Ehdr header{};
+-        if (!host.readGuest(guestAddress, &header, sizeof(header)) || !validElfHeader(header))
++        if (!read(guestAddress, &header, sizeof(header)) || !validElfHeader(header))
+             return false;
+ 
+         uint64_t required = sizeof(header);
+@@ -334,7 +338,7 @@ namespace ps2x::iop::detail
+             return false; // Should we log an error here? TODO check later
+ 
+         bytes.resize(static_cast<size_t>(required));
+-        if (!host.readGuest(guestAddress, bytes.data(), bytes.size()))
++        if (!read(guestAddress, bytes.data(), bytes.size()))
+             return false;
+ 
+         if (header.shnum != 0u && header.shentsize >= sizeof(Elf32Shdr))
+@@ -364,7 +368,19 @@ namespace ps2x::iop::detail
+             return false;
+ 
+         bytes.resize(static_cast<size_t>(required));
+-        return host.readGuest(guestAddress, bytes.data(), bytes.size());
++        return read(guestAddress, bytes.data(), bytes.size());
++    }
++
++    bool IopModuleLoader::readElfFromGuest(IopHost &host, uint32_t guestAddress, std::vector<uint8_t> &bytes)
++    {
++        return readElfWith([&](uint32_t address, void *destination, size_t size)
++                           { return host.readGuest(address, destination, size); }, guestAddress, bytes);
++    }
++
++    bool IopModuleLoader::readElfFromIop(const IopMemory &memory, uint32_t iopAddress, std::vector<uint8_t> &bytes)
++    {
++        return readElfWith([&](uint32_t address, void *destination, size_t size)
++                           { return memory.readRam(address, destination, size); }, iopAddress, bytes);
+     }
+ 
+     IopImageLoadResult IopModuleLoader::load(std::span<const uint8_t> image, IopMemory &memory, uint32_t moduleCursor)
+diff --git a/ps2xIOP/src/emulator/services/iop_module_loader.h b/ps2xIOP/src/emulator/services/iop_module_loader.h
+index 6cd9ef6..bede5b0 100644
+--- a/ps2xIOP/src/emulator/services/iop_module_loader.h
++++ b/ps2xIOP/src/emulator/services/iop_module_loader.h
+@@ -43,6 +43,8 @@ namespace ps2x::iop::detail
+     public:
+         [[nodiscard]] static bool readWholeHostFile(IopHost &host, std::string_view guestPath, std::vector<uint8_t> &bytes);
+         [[nodiscard]] static bool readElfFromGuest(IopHost &host, uint32_t guestAddress, std::vector<uint8_t> &bytes);
++        // sceSifLoadModuleBuffer: the module image the EE copied into IOP RAM
++        [[nodiscard]] static bool readElfFromIop(const IopMemory &memory, uint32_t iopAddress, std::vector<uint8_t> &bytes);
+         [[nodiscard]] static IopImageLoadResult load(std::span<const uint8_t> image, IopMemory &memory, uint32_t moduleCursor);
+     };
+ }
 diff --git a/ps2xRecomp/include/ps2recomp/ps2_recompiler.h b/ps2xRecomp/include/ps2recomp/ps2_recompiler.h
 index dd62275..296850d 100644
 --- a/ps2xRecomp/include/ps2recomp/ps2_recompiler.h
@@ -654,8 +816,77 @@ index 39dc2de..ad934d5 100644
 +// The debug panel hands its ImGui frame to the Vulkan present; without it the panel draws through raylib.
 +struct ImDrawData;
 +void setPresentUi(ImDrawData *) {}
+diff --git a/ps2xRuntime/src/lib/ps2_host_settings.cpp b/ps2xRuntime/src/lib/ps2_host_settings.cpp
+index 0396c38..4764e82 100644
+--- a/ps2xRuntime/src/lib/ps2_host_settings.cpp
++++ b/ps2xRuntime/src/lib/ps2_host_settings.cpp
+@@ -29,57 +29,31 @@ namespace ps2_host_settings
+ 
+         // What a missing file is replaced by: every setting, at its default, with what it does.
+         const char *kDefaultFile =
+-            "# The game's settings. A settings program writes this file; you can also edit it by hand.\n"
++            "# The game's settings. Edit by hand; delete the file to get the defaults back.\n"
+             "# A VENDETTA_* switch set in the environment wins over a line here.\n"
+             "\n"
+             "[display]\n"
+             "mode = \"borderless\"      # \"window\" or \"borderless\" (a frameless window the size of the screen)\n"
+             "screen = 1               # which screen: 1 = the main one\n"
+             "maximised = true         # start maximised (window only)\n"
+-            "fullscreen_width = 0     # these three: only with the test switch VENDETTA_WINDOW=fullscreen\n"
+-            "fullscreen_height = 0\n"
+-            "refresh_rate = \"automatic\" # \"automatic\" (the screen's rate when it suits the game's 60 frames a\n"
+-            "                         # second, else the smoothest rate it has), \"smoothest\" (the highest multiple of 60 Hz),\n"
+-            "                         # 0 = the screen's own (no switch), or a number such as 60 or 120\n"
+             "vsync = true             # wait for the screen before showing each picture (no tearing)\n"
+-            "shape = \"widescreen\"     # \"widescreen\" (matches at 16:9 with more of the arena; menus and movies 4:3),\n"
++            "shape = \"widescreen\"     # \"widescreen\" (the levels at 16:9, showing more; menus and movies 4:3),\n"
+             "                         # \"4:3\" (as on the PS2, bars at the sides) or \"stretch\" (fill the window)\n"
+             "\n"
+             "[graphics]\n"
+             "renderer = \"gpu\"         # \"gpu\" (the graphics card) or \"cpu\"\n"
+-            "scale = 16               # how much sharper than the PS2: 1, 2, 4, 8 or 16 (16: four times its detail)\n"
++            "scale = 8                # how much sharper than the PS2: 1, 2, 4, 8 or 16 (16 needs a strong graphics card)\n"
+             "filter = \"fsr\"           # scaling to the window: \"fsr\", \"smooth\" or \"blocky\"\n"
+             "sharpening = 75          # 0-100, with \"fsr\"\n"
+-            "sharp_2d = true          # the HUD, text and menus in the same detail as the 3-D (as PCSX2 upscales them); false = as on the PS2\n"
+-            "camera = \"vendetta\"      # the camera in matches: \"vendetta\" (the game's own), \"nomercy\" (WWF No Mercy's\n"
+-            "                         # style) or \"wk2\" (Wrestle Kingdom 2's style)\n"
++            "sharp_2d = true          # the HUD, text and menus in the same detail as the 3-D; false = as on the PS2\n"
+             "\n"
+             "[sound]\n"
+             "volume = 100             # 0-100\n"
+-            "reverb = true            # the echo the PS2's sound chip adds in matches\n"
++            "reverb = true            # the echo the PS2's sound chip adds\n"
+             "\n"
+             "[controls]\n"
+-            "multitap = true          # up to 4 players (a multitap in port 2, as on the PS2); false = 2 controllers\n"
+-            "vibration_1 = true       # each player's controller vibrates (Xbox-style / XInput controllers)\n"
+-            "vibration_2 = true\n"
+-            "vibration_3 = true\n"
+-            "vibration_4 = true\n"
+-            "keyboard = 0             # which player the keyboard plays as (with their controller): 1-4, 0 = nobody\n"
+-            "\n"
+-            "[gameplay]\n"
+-            "unlock_all = false       # every wrestler, attire, arena and picture for every player, with or without a save.\n"
+-            "                         # The save itself is not changed (false = what the save has unlocked)\n"
+-            "match_speed = \"vendetta\" # how fast the fight plays: \"vendetta\" (the game's own) or \"nomercy\" (WWF No Mercy's\n"
+-            "                         # pace, 0.86); intros, menus and the end of a match keep the game's own speed\n"
+-            "custom_speed = false     # true = custom_match_speed instead of match_speed\n"
+-            "custom_match_speed = 1.000 # 0.750-1.250: 1.000 = the game's own speed, lower = slower\n"
+-            "\n"
+-            "[updates]\n"
+-            "check_on_open = true     # check for a new version when the game or the settings program starts\n"
+-            "\n"
+-            "[play]\n"
+-            "project = \"\"             # what the game plays when started on its own: a project (projects\\<name>), \"\" = the\n"
+-            "                         # original game (no mods); the settings program's Play page sets it\n";
++            "vibration_1 = true       # the controller vibrates (Xbox-style / XInput controllers)\n"
++            "keyboard = 1             # the keyboard plays as player 1 (1), or not at all (0)\n";
+ 
+         std::string trim(const std::string &text)
+         {
 diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
-index 9ffc580..a5c2722 100644
+index 9ffc580..7a5b4a4 100644
 --- a/ps2xRuntime/src/lib/ps2_runtime.cpp
 +++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
 @@ -1887,6 +1887,31 @@ void PS2Runtime::executeVU0Microprogram(uint8_t *rdram, R5900Context *ctx, uint3
@@ -742,6 +973,22 @@ index 9ffc580..a5c2722 100644
          uint32_t presentWidth = FB_WIDTH;
          uint32_t presentHeight = DEFAULT_DISPLAY_HEIGHT;
          // The window shows each picture once, as soon as the game has finished it: it waits for a new one (up to
+@@ -3074,6 +3094,15 @@ void PS2Runtime::run()
+         // widescreen: a frame the game drew wide (squeezed into its buffer) is shown at exactly the target shape, filling
+         // a screen of that shape (the TV picture's small covered-share correction would leave thin bars at the sides)
+         const float wideAspect = ps2_widescreen::wideNow() ? ps2_widescreen::targetAspect() : 0.0f;
++        {
++            static float s_loggedWide = -1.0f; // a line per change of shape (VENDETTA_HOSTPROF)
++            static const bool log = std::getenv("VENDETTA_HOSTPROF") != nullptr;
++            if (log && wideAspect != s_loggedWide)
++            {
++                s_loggedWide = wideAspect;
++                std::cerr << "[present] " << (wideAspect > 0.0f ? "wide" : "4:3") << " (fresh picture " << freshPicture << ")" << std::endl;
++            }
++        }
+         const float aspect = wideAspect > 0.0f        ? wideAspect
+                              : displayAspect > 0.0f ? displayAspect * s_presentAspectScale
+                                                     : screenWidth / std::max(1.0f, screenHeight);
 diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
 index f7631d3..3ce0e8b 100644
 --- a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp

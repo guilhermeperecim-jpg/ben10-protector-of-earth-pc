@@ -1,0 +1,83 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Ben10Launcher.Views.ArtView">
+    <!-- The home page's picture, our own drawing (nothing from the game or the show): a desert canyon at dusk under a
+         falling green light. Drawn on a 1200 x 800 canvas, filling the space it is given. -->
+    <Viewbox Stretch="UniformToFill">
+        <Canvas Width="1200" Height="800">
+            <!-- the sky -->
+            <Rectangle Width="1200" Height="800">
+                <Rectangle.Fill>
+                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                        <GradientStop Offset="0" Color="#08120d" />
+                        <GradientStop Offset="0.45" Color="#11251a" />
+                        <GradientStop Offset="0.72" Color="#2a3320" />
+                        <GradientStop Offset="0.9" Color="#4a3420" />
+                    </LinearGradientBrush>
+                </Rectangle.Fill>
+            </Rectangle>
+            <!-- stars -->
+            <Ellipse Canvas.Left="120" Canvas.Top="90" Width="3" Height="3" Fill="#cfe9c4" Opacity="0.8" />
+            <Ellipse Canvas.Left="260" Canvas.Top="210" Width="2" Height="2" Fill="#cfe9c4" Opacity="0.6" />
+            <Ellipse Canvas.Left="410" Canvas.Top="60" Width="2" Height="2" Fill="#cfe9c4" Opacity="0.7" />
+            <Ellipse Canvas.Left="980" Canvas.Top="120" Width="3" Height="3" Fill="#cfe9c4" Opacity="0.7" />
+            <Ellipse Canvas.Left="1090" Canvas.Top="300" Width="2" Height="2" Fill="#cfe9c4" Opacity="0.5" />
+            <Ellipse Canvas.Left="560" Canvas.Top="330" Width="2" Height="2" Fill="#cfe9c4" Opacity="0.5" />
+            <Ellipse Canvas.Left="340" Canvas.Top="360" Width="2" Height="2" Fill="#cfe9c4" Opacity="0.4" />
+            <Ellipse Canvas.Left="860" Canvas.Top="40" Width="2" Height="2" Fill="#cfe9c4" Opacity="0.6" />
+            <!-- the green glow -->
+            <Ellipse Canvas.Left="340" Canvas.Top="20" Width="520" Height="420">
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop Offset="0" Color="#667fd23f" />
+                        <GradientStop Offset="0.45" Color="#227fd23f" />
+                        <GradientStop Offset="1" Color="#007fd23f" />
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+            <!-- the falling light's trail -->
+            <Path Data="M1020,-40 L610,214 L620,232 Z" Opacity="0.9">
+                <Path.Fill>
+                    <LinearGradientBrush StartPoint="100%,0%" EndPoint="0%,100%">
+                        <GradientStop Offset="0" Color="#007fd23f" />
+                        <GradientStop Offset="1" Color="#cc9be563" />
+                    </LinearGradientBrush>
+                </Path.Fill>
+            </Path>
+            <!-- the light, in its ring -->
+            <Ellipse Canvas.Left="510" Canvas.Top="138" Width="200" Height="150" Stroke="#7fd23f" StrokeThickness="3"
+                     Opacity="0.85" />
+            <Ellipse Canvas.Left="480" Canvas.Top="118" Width="260" Height="190" Stroke="#7fd23f" StrokeThickness="1.5"
+                     StrokeDashArray="6,8" Opacity="0.55" />
+            <Ellipse Canvas.Left="572" Canvas.Top="176" Width="76" Height="76">
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop Offset="0" Color="#ffffff" />
+                        <GradientStop Offset="0.35" Color="#d8ffb8" />
+                        <GradientStop Offset="1" Color="#007fd23f" />
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+            <!-- far mesas -->
+            <Path Fill="#1c2018" Stroke="#3c5a2a" StrokeThickness="1.5"
+                  Data="M0,560 L60,540 L70,500 L190,496 L200,532 L300,540 L330,470 L470,462 L486,520 L560,530 L600,560
+                        L700,552 L720,498 L860,492 L878,540 L990,548 L1010,486 L1140,480 L1160,530 L1200,536 L1200,800 L0,800 Z" />
+            <!-- the big mesa, rimmed by the light -->
+            <Path Fill="#161a14" Stroke="#7fd23f" StrokeThickness="3"
+                  Data="M120,800 L180,640 L200,600 L240,592 L252,560 L340,548 L360,520 L580,512 L600,540 L680,548 L696,586
+                        L750,596 L780,650 L860,800 Z" />
+            <!-- its layers -->
+            <Path Stroke="#3f5a2e" StrokeThickness="1.5" Opacity="0.8"
+                  Data="M204,660 L780,668 M190,700 L810,706 M176,740 L832,748" />
+            <Path Stroke="#3f5a2e" StrokeThickness="1.2" Opacity="0.6"
+                  Data="M380,560 L368,640 M460,556 L456,700 M540,556 L548,660 M640,566 L660,720" />
+            <!-- the near ridges -->
+            <Path Fill="#0f120e" Stroke="#4f7a33" StrokeThickness="2"
+                  Data="M0,700 L50,672 L90,690 L140,650 L190,688 L240,664 L290,700 L330,676 L400,716 L470,690 L540,724
+                        L620,700 L700,730 L780,698 L860,724 L930,690 L1000,716 L1060,672 L1120,700 L1200,668 L1200,800 L0,800 Z" />
+            <Path Fill="#0b0d0a" Stroke="#3a5a26" StrokeThickness="1.5"
+                  Data="M0,760 L80,736 L160,760 L240,730 L320,766 L420,742 L520,770 L640,744 L760,772 L880,740 L980,768
+                        L1080,742 L1200,764 L1200,800 L0,800 Z" />
+        </Canvas>
+    </Viewbox>
+</UserControl>

@@ -1,0 +1,60 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ben10Launcher.ViewModels"
+             xmlns:l="using:Ben10Launcher.Services"
+             x:Class="Ben10Launcher.Views.ControlsView"
+             x:DataType="vm:SettingsViewModel">
+    <UserControl.Styles>
+        <Style Selector="Grid.keys TextBlock">
+            <Setter Property="FontSize" Value="17" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Grid.keys TextBlock.ps2">
+            <Setter Property="Foreground" Value="{StaticResource VAccent}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </UserControl.Styles>
+    <!-- the keyboard's keys as ps2_pad.cpp reads them (player 1), the keyboard and vibration switches -->
+    <ScrollViewer>
+        <Grid ColumnDefinitions="*,40,420">
+            <StackPanel Spacing="10">
+                <TextBlock Text="{l:T Keyboard}" FontSize="22" FontWeight="Bold" Margin="0,4,0,4" />
+                <Grid Classes="keys" ColumnDefinitions="200,*" RowSpacing="9"
+                      RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                    <TextBlock Classes="ps2" Text="{l:T D-pad}" />
+                    <TextBlock Grid.Column="1" Text="W A S D  /  ↑ ← ↓ →" />
+                    <TextBlock Grid.Row="1" Classes="ps2" Text="✕" />
+                    <TextBlock Grid.Row="1" Grid.Column="1" Text="X  /  Space" />
+                    <TextBlock Grid.Row="2" Classes="ps2" Text="○" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="C  /  Esc" />
+                    <TextBlock Grid.Row="3" Classes="ps2" Text="□" />
+                    <TextBlock Grid.Row="3" Grid.Column="1" Text="Z  /  Numpad 0" />
+                    <TextBlock Grid.Row="4" Classes="ps2" Text="△" />
+                    <TextBlock Grid.Row="4" Grid.Column="1" Text="V  /  Numpad 1" />
+                    <TextBlock Grid.Row="5" Classes="ps2" Text="L1" />
+                    <TextBlock Grid.Row="5" Grid.Column="1" Text="Q" />
+                    <TextBlock Grid.Row="6" Classes="ps2" Text="R1" />
+                    <TextBlock Grid.Row="6" Grid.Column="1" Text="E" />
+                    <TextBlock Grid.Row="7" Classes="ps2" Text="L2" />
+                    <TextBlock Grid.Row="7" Grid.Column="1" Text="{l:T 'Left Shift'}" />
+                    <TextBlock Grid.Row="8" Classes="ps2" Text="R2" />
+                    <TextBlock Grid.Row="8" Grid.Column="1" Text="{l:T 'Right Shift'}" />
+                    <TextBlock Grid.Row="9" Classes="ps2" Text="START" />
+                    <TextBlock Grid.Row="9" Grid.Column="1" Text="Enter" />
+                    <TextBlock Grid.Row="10" Classes="ps2" Text="SELECT" />
+                    <TextBlock Grid.Row="10" Grid.Column="1" Text="Tab" />
+                    <TextBlock Grid.Row="11" Classes="ps2" Text="{l:T 'Right stick'}" />
+                    <TextBlock Grid.Row="11" Grid.Column="1" Text="I J K L" />
+                </Grid>
+            </StackPanel>
+            <StackPanel Grid.Column="2" Spacing="16">
+                <TextBlock Text="{l:T Controls}" FontSize="22" FontWeight="Bold" Margin="0,4,0,4" />
+                <CheckBox FontSize="18" Content="{l:T 'Play with the keyboard'}" IsChecked="{Binding Keyboard}" />
+                <CheckBox FontSize="18" Content="{l:T 'Controller vibration'}" IsChecked="{Binding Vibration}" />
+                <TextBlock FontSize="16" Foreground="{StaticResource VMuted}" TextWrapping="Wrap"
+                           Text="{l:T 'Xbox-style controllers (XInput) work as they are. PlayStation controllers work through Steam or DS4Windows.'}" />
+                <TextBlock FontSize="16" Classes="good" Text="{Binding ControllersText}" />
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</UserControl>

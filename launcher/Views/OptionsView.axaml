@@ -1,0 +1,114 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ben10Launcher.ViewModels"
+             xmlns:l="using:Ben10Launcher.Services"
+             x:Class="Ben10Launcher.Views.OptionsView"
+             x:DataType="vm:SettingsViewModel">
+    <UserControl.Styles>
+        <Style Selector="ComboBox">
+            <Setter Property="Width" Value="470" />
+            <Setter Property="FontSize" Value="17" />
+        </Style>
+        <Style Selector="StackPanel.row">
+            <Setter Property="Orientation" Value="Horizontal" />
+            <Setter Property="Spacing" Value="16" />
+        </Style>
+        <Style Selector="StackPanel.row > TextBlock">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="CheckBox">
+            <Setter Property="FontSize" Value="18" />
+        </Style>
+        <Style Selector="Slider">
+            <Setter Property="Width" Value="470" />
+        </Style>
+    </UserControl.Styles>
+    <DockPanel>
+        <!-- under the tabs: this PC, the defaults, a note -->
+        <StackPanel DockPanel.Dock="Bottom" Spacing="10">
+            <Border Height="1" Background="{StaticResource VLine}" Margin="0,0,0,6" />
+            <TextBlock Text="{Binding Hardware}" FontSize="16" Foreground="{StaticResource VMuted}" />
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button Classes="small" Content="{l:T 'Restore defaults'}" Command="{Binding RestoreDefaultsCommand}" />
+                <TextBlock Text="{l:T '(the settings of a new install)'}" FontSize="15" Foreground="{StaticResource VMuted}"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+            <TextBlock Text="{l:T 'Saved as you change them. They apply the next time the game opens.'}" FontSize="15"
+                       Foreground="{StaticResource VMuted}" />
+            <TextBlock Text="{Binding Note}" FontSize="15" Classes="warn" IsVisible="{Binding Note, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        </StackPanel>
+        <TabControl>
+            <TabItem Header="{l:T Display}">
+                <ScrollViewer>
+                    <StackPanel Spacing="16" Margin="0,14,0,10">
+                        <StackPanel Classes="row">
+                            <ComboBox ItemsSource="{Binding ModeNames}" SelectedIndex="{Binding ModeIndex}" />
+                            <TextBlock Text="{l:T 'Window mode'}" />
+                        </StackPanel>
+                        <StackPanel Classes="row">
+                            <ComboBox ItemsSource="{Binding Screens}" SelectedIndex="{Binding ScreenIndex}" />
+                            <TextBlock Text="{l:T Screen}" />
+                        </StackPanel>
+                        <CheckBox Content="{l:T 'Start maximised'}" IsChecked="{Binding Maximised}" IsEnabled="{Binding IsWindow}" />
+                        <CheckBox Content="{l:T 'VSync (no tearing)'}" IsChecked="{Binding Vsync}" />
+                        <StackPanel Classes="row">
+                            <ComboBox ItemsSource="{Binding ShapeNames}" SelectedIndex="{Binding ShapeIndex}" />
+                            <TextBlock Text="{l:T 'Picture shape'}" />
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="{l:T Graphics}">
+                <ScrollViewer>
+                    <StackPanel Spacing="16" Margin="0,14,0,10">
+                        <StackPanel Classes="row">
+                            <ComboBox ItemsSource="{Binding RendererNames}" SelectedIndex="{Binding RendererIndex}" />
+                            <TextBlock Text="{l:T 'Drawn by'}" />
+                        </StackPanel>
+                        <StackPanel Classes="row" IsEnabled="{Binding IsGpu}">
+                            <ComboBox ItemsSource="{Binding ScaleNames}" SelectedIndex="{Binding ScaleIndex}" />
+                            <TextBlock Text="{l:T Sharpness}" />
+                        </StackPanel>
+                        <TextBlock Text="{l:T '16x needs a strong graphics card'}" FontSize="15" Foreground="{StaticResource VMuted}"
+                                   Margin="2,-8,0,0" />
+                        <StackPanel Classes="row" IsEnabled="{Binding IsGpu}">
+                            <ComboBox ItemsSource="{Binding FilterNames}" SelectedIndex="{Binding FilterIndex}" />
+                            <TextBlock Text="{l:T 'Scaling to the window'}" />
+                        </StackPanel>
+                        <StackPanel Classes="row" IsEnabled="{Binding IsFsr}">
+                            <Slider Minimum="0" Maximum="100" Value="{Binding Sharpening}" />
+                            <TextBlock Text="{Binding SharpeningText}" Width="40" />
+                            <TextBlock Text="{l:T 'FSR sharpening'}" />
+                        </StackPanel>
+                        <CheckBox Content="{l:T 'HUD, text and menus as sharp as the 3-D'}" IsChecked="{Binding Sharp2D}"
+                                  IsEnabled="{Binding IsGpu}" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="{l:T Sound}">
+                <StackPanel Spacing="16" Margin="0,14,0,10">
+                    <StackPanel Classes="row">
+                        <Slider Minimum="0" Maximum="100" Value="{Binding Volume}" />
+                        <TextBlock Text="{Binding VolumeText}" Width="56" />
+                        <TextBlock Text="{l:T Volume}" />
+                    </StackPanel>
+                    <CheckBox Content="{l:T 'Echo (the PS2 sound chip\'s reverb)'}" IsChecked="{Binding Reverb}" />
+                </StackPanel>
+            </TabItem>
+            <TabItem Header="{l:T Launcher}">
+                <StackPanel Spacing="16" Margin="0,14,0,10">
+                    <StackPanel Classes="row">
+                        <ComboBox ItemsSource="{Binding LanguageNames}" SelectedIndex="{Binding LanguageIndex}" />
+                        <TextBlock Text="{l:T Language}" />
+                    </StackPanel>
+                    <CheckBox Content="{l:T 'Check for updates when the launcher opens'}" IsChecked="{Binding CheckUpdates}" />
+                    <StackPanel Classes="row">
+                        <Button Classes="small" Content="{l:T 'Make them'}" Command="{Binding MakeShortcutsCommand}" />
+                        <TextBlock Text="{l:T 'Desktop shortcuts'}" />
+                    </StackPanel>
+                </StackPanel>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</UserControl>

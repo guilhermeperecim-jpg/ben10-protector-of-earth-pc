@@ -11,6 +11,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BAD_EXT = {'.iso', '.chd', '.cso', '.bin', '.img', '.elf', '.irx', '.wad', '.pss', '.png', '.jpg', '.jpeg', '.bmp',
            '.wav', '.pcm', '.ps2', '.mcd', '.ico', '.sys'}
 MAX_BYTES = 1 << 20
+# our own pictures (the launcher's icon, drawn by tools/make_icon.py, and its pages in docs/images/launcher-*.png,
+# drawn by the launcher's --shot): the only images that may be published
+OWN_ART = ('launcher/Assets/icon.png', 'launcher/Assets/icon.ico')
 CHUNK = 64  # bytes of the executable that must not appear in a published file
 
 
@@ -37,7 +40,9 @@ def problems(path, chunks):
         return []
     found = []
     ext = os.path.splitext(path)[1].lower()
-    if ext in BAD_EXT:
+    rel = path.replace(os.sep, '/')
+    own = rel in OWN_ART or (rel.startswith('docs/images/launcher-') and ext == '.png')
+    if ext in BAD_EXT and not own:
         found.append(f'extension {ext} (disc / game media)')
     size = os.path.getsize(full)
     limit = MAX_BYTES * 5 if ext == '.diff' else MAX_BYTES  # text patches of the runtimes (patches/)

@@ -3,6 +3,7 @@
 #include "game_overrides.h"
 #include "ps2_runtime.h"
 #include "ps2_runtime_macros.h"
+#include "ps2_syscalls.h"
 
 #include "runtime/ps2_host_profile.h"
 
@@ -10,11 +11,16 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <algorithm>
 #include <map>
 #include <thread>
+#include <utility>
 #include <vector>
+
+void installBen10Videos(PS2Runtime &runtime);     // ben10_videos.cpp
+void installBen10Widescreen(PS2Runtime &runtime); // ben10_widescreen.cpp
 
 namespace
 {
@@ -220,8 +226,127 @@ namespace
             .detach();
     }
 
+    // PS2X_GAMELOG=1: the game's own debug printf (0x205600, compiled to print nothing on a retail disc) as "[game] ..."
+    // lines (%s %d %i %u %x %X %c %p; other conversions print as "?"), and every CBinkPlayer::Play(name) (0x118508)
+    constexpr uint32_t kGamePrintf = 0x00205600u, kBinkPlay = 0x00118508u;
+    PS2Runtime::RecompiledFunction g_gamePrintfOriginal = nullptr, g_binkPlayOriginal = nullptr;
+
+    std::string guestString(const uint8_t *rdram, uint32_t address)
+    {
+        std::string text;
+        for (uint32_t i = 0; i < 256u && address != 0u; ++i)
+        {
+            const char c = static_cast<char>(rdram[(address + i) & 0x01FFFFFFu]);
+            if (c == 0)
+                break;
+            text += c;
+        }
+        return text;
+    }
+
+    void gamePrintfLogged(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const std::string format = guestString(rdram, GPR_U32(ctx, 4));
+        std::string out;
+        uint32_t next = 5u; // a1.. then stack words are not followed (rare in the engine's messages)
+        for (size_t i = 0; i < format.size(); ++i)
+        {
+            if (format[i] != '%' || i + 1 >= format.size())
+            {
+                if (format[i] != '\n')
+                    out += format[i];
+                continue;
+            }
+            size_t j = i + 1;
+            while (j < format.size() && std::strchr("-+ #0123456789.l", format[j]))
+                ++j;
+            const char conv = j < format.size() ? format[j] : '%';
+            const uint32_t arg = next <= 11u ? GPR_U32(ctx, next) : 0u;
+            char buf[32];
+            switch (conv)
+            {
+            case '%': out += '%'; break;
+            case 's': out += guestString(rdram, arg); ++next; break;
+            case 'd': case 'i': std::snprintf(buf, sizeof(buf), "%d", static_cast<int32_t>(arg)); out += buf; ++next; break;
+            case 'u': std::snprintf(buf, sizeof(buf), "%u", arg); out += buf; ++next; break;
+            case 'x': case 'X': case 'p': std::snprintf(buf, sizeof(buf), "%x", arg); out += buf; ++next; break;
+            case 'c': out += static_cast<char>(arg); ++next; break;
+            default: out += '?'; ++next; break;
+            }
+            i = j;
+        }
+        std::fprintf(stderr, "[game] %s%c", out.c_str(), 10);
+        g_gamePrintfOriginal(rdram, ctx, runtime);
+    }
+
+    void binkPlayLogged(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        std::fprintf(stderr, "[bink] Play(\"%s\", a1=%x) state(0x21e058)=%u%c", guestString(rdram, GPR_U32(ctx, 4)).c_str(),
+                     GPR_U32(ctx, 5), guestWord(rdram, 0x0021E058u), 10);
+        g_binkPlayOriginal(rdram, ctx, runtime);
+        std::fprintf(stderr, "[bink]   -> v0=%x%c", GPR_U32(ctx, 2), 10);
+    }
+
+    // PS2X_TRACEFN=<hex addr>[,<hex addr>...] (up to 8): each call of those game functions with a0-a3, f12 and its v0
+    constexpr int kMaxTraced = 8;
+    uint32_t g_tracedAddr[kMaxTraced] = {};
+    PS2Runtime::RecompiledFunction g_tracedOriginal[kMaxTraced] = {};
+
+    template <int N>
+    void tracedCall(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        std::fprintf(stderr, "[trace] %x(a0=%x a1=%x a2=%x a3=%x f12=%g) ra=%x%c", g_tracedAddr[N], GPR_U32(ctx, 4), GPR_U32(ctx, 5),
+                     GPR_U32(ctx, 6), GPR_U32(ctx, 7), static_cast<double>(ctx->f[12]), GPR_U32(ctx, 31), 10);
+        g_tracedOriginal[N](rdram, ctx, runtime);
+        std::fprintf(stderr, "[trace]   %x -> v0=%x%c", g_tracedAddr[N], GPR_U32(ctx, 2), 10);
+    }
+
+    template <int... N>
+    void installTraces(PS2Runtime &runtime, std::integer_sequence<int, N...>)
+    {
+        const PS2Runtime::RecompiledFunction trampolines[] = {tracedCall<N>...};
+        const char *list = std::getenv("PS2X_TRACEFN");
+        for (int n = 0; list && *list && n < kMaxTraced; ++n)
+        {
+            char *end = nullptr;
+            g_tracedAddr[n] = static_cast<uint32_t>(std::strtoul(list, &end, 16));
+            g_tracedOriginal[n] = runtime.lookupFunction(g_tracedAddr[n]);
+            if (g_tracedOriginal[n])
+                runtime.replaceFunction(g_tracedAddr[n], trampolines[n]);
+            list = (end && *end == ',') ? end + 1 : nullptr;
+        }
+    }
+
+    // sceSifStopModule / sceSifUnloadModule: the game's own (an RPC to the IOP's loadfile server, which our IOP doesn't
+    // serve: the caller waited forever) -> the runtime's SifStopModule; unloading = the module left where it is. Only
+    // the RAD Bink player's shutdown uses them, after the boot movies.
+    constexpr uint32_t kSifStopModule = 0x001C9F88u, kSifUnloadModule = 0x001CA190u;
+
+    void sifStopModule(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        ctx->pc = GPR_U32(ctx, 31);
+        ps2_syscalls::SifStopModule(rdram, ctx, runtime);
+    }
+
+    void sifUnloadModule(uint8_t *, R5900Context *ctx, PS2Runtime *)
+    {
+        setReturnS32(ctx, GPR_S32(ctx, 4) >= 0 ? GPR_S32(ctx, 4) : -1);
+        ctx->pc = GPR_U32(ctx, 31);
+    }
+
     void applyBen10(PS2Runtime &runtime)
     {
+        installTraces(runtime, std::make_integer_sequence<int, kMaxTraced>{});
+        if (std::getenv("PS2X_GAMELOG"))
+        {
+            g_gamePrintfOriginal = runtime.lookupFunction(kGamePrintf);
+            g_binkPlayOriginal = runtime.lookupFunction(kBinkPlay);
+            if (g_gamePrintfOriginal && g_binkPlayOriginal)
+            {
+                runtime.replaceFunction(kGamePrintf, gamePrintfLogged);
+                runtime.replaceFunction(kBinkPlay, binkPlayLogged);
+            }
+        }
         startHostProfile(runtime);
         if (std::getenv("PS2X_FMTLOG"))
         {
@@ -235,15 +360,22 @@ namespace
         }
         // The disc image (PS2X_CD_IMAGE, set by tools\run.ps1): EE sceCdSearchFile/sceCdRead and the IOP's cdvdman
         // (used by CDARB.IRX to stream GAME.WAD) then agree on the disc's real sector numbers.
-        if (const char *image = std::getenv("PS2X_CD_IMAGE"); image != nullptr && image[0] != '\0')
+        // Without it (a player's install, started from its shortcut): disc\SLUS-21661.iso beside game\, as
+        // tools\prepare_disc.py puts it.
         {
             PS2Runtime::IoPaths paths = PS2Runtime::getIoPaths();
-            paths.cdImage = image;
+            const char *image = std::getenv("PS2X_CD_IMAGE");
+            if (image != nullptr && image[0] != '\0')
+                paths.cdImage = image;
+            else if (std::filesystem::path beside = paths.elfDirectory.parent_path() / "disc" / "SLUS-21661.iso";
+                     std::filesystem::exists(beside))
+                paths.cdImage = beside;
             PS2Runtime::setIoPaths(paths);
-            std::fprintf(stderr, "[ben10] disc image: %s\n", image);
+            if (paths.cdImage.empty())
+                std::fprintf(stderr, "[ben10] no disc image (PS2X_CD_IMAGE, or disc\\SLUS-21661.iso): CDARB cannot read GAME.WAD\n");
+            else
+                std::fprintf(stderr, "[ben10] disc image: %s\n", paths.cdImage.string().c_str());
         }
-        else
-            std::fprintf(stderr, "[ben10] PS2X_CD_IMAGE not set: CDARB cannot read GAME.WAD\n");
         // PS2X_MC_ROOT: another memory card folder (tools\run.ps1 uses a scratch card, so its scripted runs never
         // touch the player's save in game\mc0).
         if (const char *mc = std::getenv("PS2X_MC_ROOT"); mc != nullptr && mc[0] != '\0')
@@ -254,6 +386,13 @@ namespace
             std::fprintf(stderr, "[ben10] memory card: %s\n", mc);
         }
 
+        installBen10Videos(runtime);
+        installBen10Widescreen(runtime);
+        if (runtime.lookupFunction(kSifStopModule) && runtime.lookupFunction(kSifUnloadModule))
+        {
+            runtime.replaceFunction(kSifStopModule, sifStopModule);
+            runtime.replaceFunction(kSifUnloadModule, sifUnloadModule);
+        }
         g_pureVirtualOriginal = runtime.lookupFunction(kPureVirtual);
         if (g_pureVirtualOriginal != nullptr)
             runtime.replaceFunction(kPureVirtual, pureVirtualTrap);

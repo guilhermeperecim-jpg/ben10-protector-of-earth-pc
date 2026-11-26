@@ -1,0 +1,29 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:l="using:Ben10Launcher.Services"
+             x:Class="Ben10Launcher.Views.PageHeader"
+             x:Name="Root">
+    <!-- a page's header: the program's name, the page's title, Back (when the page has one); a green line under it -->
+    <StackPanel>
+        <Border Height="104" Padding="44,0">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                    <GradientStop Offset="0" Color="#0e1a12" />
+                    <GradientStop Offset="0.65" Color="#183022" />
+                    <GradientStop Offset="1" Color="#3a3a1c" />
+                </LinearGradientBrush>
+            </Border.Background>
+            <Grid ColumnDefinitions="*,Auto">
+                <StackPanel VerticalAlignment="Center" Spacing="2">
+                    <TextBlock Classes="sub" Text="BEN 10 RECOMP" FontSize="17" />
+                    <TextBlock Text="{Binding #Root.Title}" FontSize="30" FontWeight="Bold" />
+                </StackPanel>
+                <Button Grid.Column="1" Classes="small" Width="200" Height="46" FontSize="20"
+                        HorizontalContentAlignment="Center" VerticalContentAlignment="Center" VerticalAlignment="Center"
+                        Content="{l:T Back}" Command="{Binding #Root.BackCommand}"
+                        IsVisible="{Binding #Root.BackCommand, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            </Grid>
+        </Border>
+        <Border Height="2" Background="{StaticResource VAccent}" Opacity="0.6" />
+    </StackPanel>
+</UserControl>

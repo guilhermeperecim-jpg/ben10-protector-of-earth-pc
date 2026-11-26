@@ -1,0 +1,37 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ben10Launcher.ViewModels"
+             xmlns:l="using:Ben10Launcher.Services"
+             x:Class="Ben10Launcher.Views.GameFilesView"
+             x:DataType="vm:MainViewModel">
+    <!-- the disc, the built game, the folders, building it again -->
+    <ScrollViewer>
+        <StackPanel Spacing="22">
+            <StackPanel Spacing="6">
+                <TextBlock Text="{l:T 'Your disc'}" FontSize="22" FontWeight="Bold" />
+                <TextBlock Text="{Binding DiscText}" FontSize="17" Classes="good" />
+                <TextBlock Text="{Binding DiscFile}" FontSize="15" Classes="mono muted" TextWrapping="Wrap" />
+            </StackPanel>
+            <StackPanel Spacing="6">
+                <TextBlock Text="{l:T 'The game'}" FontSize="22" FontWeight="Bold" />
+                <TextBlock Text="{Binding GameBuiltText}" FontSize="17" />
+            </StackPanel>
+            <WrapPanel Orientation="Horizontal">
+                <Button Classes="small" Margin="0,0,12,12" Content="{l:T 'Open the game\'s folder'}" Command="{Binding OpenFolderCommand}" />
+                <Button Classes="small" Margin="0,0,12,12" Content="{l:T 'Open the saves'}" Command="{Binding OpenSavesCommand}" />
+                <Button Classes="small" Margin="0,0,12,12" Content="{l:T 'Open the logs'}" Command="{Binding OpenLogsCommand}" />
+            </WrapPanel>
+            <TextBlock FontSize="16" Foreground="{StaticResource VMuted}" TextWrapping="Wrap"
+                       Text="{l:T 'Your saves are memory card files in game\\mc0: copy that folder to back them up.'}" />
+            <Border Height="1" Background="{StaticResource VLine}" />
+            <WrapPanel Orientation="Horizontal">
+                <Button Classes="small" Margin="0,0,12,12" Content="{l:T 'Rebuild the game'}" Command="{Binding RebuildCommand}"
+                        IsEnabled="{Binding !GameRunning}" />
+                <Button Classes="small" Margin="0,0,12,12" Content="{l:T 'Choose another disc'}" Command="{Binding ChooseDiscCommand}"
+                        IsEnabled="{Binding !GameRunning}" />
+            </WrapPanel>
+            <TextBlock FontSize="16" Foreground="{StaticResource VMuted}" TextWrapping="Wrap"
+                       Text="{l:T 'Rebuilding takes a while (like the first time). Your saves and settings are kept.'}" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
