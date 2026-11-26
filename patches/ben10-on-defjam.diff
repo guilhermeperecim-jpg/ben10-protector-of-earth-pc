@@ -1,0 +1,1107 @@
+diff --git a/ps2xRecomp/include/ps2recomp/ps2_recompiler.h b/ps2xRecomp/include/ps2recomp/ps2_recompiler.h
+index dd62275..296850d 100644
+--- a/ps2xRecomp/include/ps2recomp/ps2_recompiler.h
++++ b/ps2xRecomp/include/ps2recomp/ps2_recompiler.h
+@@ -69,6 +69,9 @@ namespace ps2recomp
+         std::unordered_set<uint32_t> m_skipFunctionStarts;
+         std::unordered_set<std::string> m_stubFunctions;
+         std::unordered_set<uint32_t> m_stubFunctionStarts;
++        // "-name@0xADDR" in stubs: the game's own code at that address, even where its name is a runtime stub's
++        // (e.g. libm's double floor where the runtime's floor stub is float)
++        std::unordered_set<uint32_t> m_noStubFunctionStarts;
+         std::unordered_map<uint32_t, std::string> m_stubHandlerBindingsByStart;
+         std::unordered_set<uint32_t> m_entryPointHintStarts;
+         std::unordered_set<uint32_t> m_correctnessCriticalFunctionStarts;
+diff --git a/ps2xRecomp/src/lib/mmi_translation_helpers.cpp b/ps2xRecomp/src/lib/mmi_translation_helpers.cpp
+index a2bcb77..926e8a6 100644
+--- a/ps2xRecomp/src/lib/mmi_translation_helpers.cpp
++++ b/ps2xRecomp/src/lib/mmi_translation_helpers.cpp
+@@ -454,17 +454,16 @@ namespace ps2recomp
+ 
+     std::string CodeGenerator::translatePEXEH(const Instruction &inst)
+     {
+-        // Swaps halfwords 1<->3 and 5<->7 within the 128-bit register
+-        return fmt::format("SET_GPR_VEC(ctx, {}, _mm_shufflelo_epi16(_mm_shufflehi_epi16(GPR_VEC(ctx, {}), _MM_SHUFFLE(2,3,0,1)), _MM_SHUFFLE(2,3,0,1)));",
++        // Exchanges halfwords 0<->2 and 4<->6 (each 64-bit half: h2 h1 h0 h3)
++        return fmt::format("SET_GPR_VEC(ctx, {}, _mm_shufflelo_epi16(_mm_shufflehi_epi16(GPR_VEC(ctx, {}), _MM_SHUFFLE(3,0,1,2)), _MM_SHUFFLE(3,0,1,2)));",
+                            inst.rd, inst.rt);
+     }
+ 
+ 
+     std::string CodeGenerator::translatePREVH(const Instruction &inst)
+     {
+-        // Reverses the order of the 8 halfwords
+-        return fmt::format("{{ __m128i mask = _mm_setr_epi8(14,15, 12,13, 10,11, 8,9, 6,7, 4,5, 2,3, 0,1); "
+-                           "SET_GPR_VEC(ctx, {}, PS2_SHUFFLE_EPI8(GPR_VEC(ctx, {}), mask)); }}",
++        // Reverses the 4 halfwords of each 64-bit half
++        return fmt::format("SET_GPR_VEC(ctx, {}, _mm_shufflelo_epi16(_mm_shufflehi_epi16(GPR_VEC(ctx, {}), _MM_SHUFFLE(0,1,2,3)), _MM_SHUFFLE(0,1,2,3)));",
+                            inst.rd, inst.rt);
+     }
+ 
+@@ -520,8 +519,8 @@ namespace ps2recomp
+ 
+     std::string CodeGenerator::translatePROT3W(const Instruction &inst)
+     {
+-        // Rotates words left by 3: [d,c,b,a] -> [a,d,c,b]
+-        return fmt::format("SET_GPR_VEC(ctx, {}, _mm_shuffle_epi32(GPR_VEC(ctx, {}), _MM_SHUFFLE(0,3,2,1)));",
++        // Rotates the lower 3 words, w3 stays: [w3 w2 w1 w0] -> [w3 w0 w2 w1]
++        return fmt::format("SET_GPR_VEC(ctx, {}, _mm_shuffle_epi32(GPR_VEC(ctx, {}), _MM_SHUFFLE(3,0,2,1)));",
+                            inst.rd, inst.rt);
+     }
+ 
+@@ -560,8 +559,8 @@ namespace ps2recomp
+ 
+     std::string CodeGenerator::translatePEXCH(const Instruction &inst)
+     {
+-        // Parallel Exchange Center Halfword (same as MMI2 PEXEH)
+-        return fmt::format("SET_GPR_VEC(ctx, {}, _mm_shufflelo_epi16(_mm_shufflehi_epi16(GPR_VEC(ctx, {}), _MM_SHUFFLE(2,3,0,1)), _MM_SHUFFLE(2,3,0,1)));",
++        // Parallel Exchange Center Halfword: h1<->h2 and h5<->h6 (each 64-bit half: h3 h1 h2 h0)
++        return fmt::format("SET_GPR_VEC(ctx, {}, _mm_shufflelo_epi16(_mm_shufflehi_epi16(GPR_VEC(ctx, {}), _MM_SHUFFLE(3,1,2,0)), _MM_SHUFFLE(3,1,2,0)));",
+                            inst.rd, inst.rt);
+     }
+ 
+@@ -577,8 +576,8 @@ namespace ps2recomp
+ 
+     std::string CodeGenerator::translatePEXCW(const Instruction &inst)
+     {
+-        // Parallel Exchange Center Word (Swaps words 0<>2, 1<>3)
+-        return fmt::format("SET_GPR_VEC(ctx, {}, _mm_shuffle_epi32(GPR_VEC(ctx, {}), _MM_SHUFFLE(1,0,3,2)));",
++        // Parallel Exchange Center Word: w1<->w2
++        return fmt::format("SET_GPR_VEC(ctx, {}, _mm_shuffle_epi32(GPR_VEC(ctx, {}), _MM_SHUFFLE(3,1,2,0)));",
+                            inst.rd, inst.rt);
+     }
+ 
+diff --git a/ps2xRecomp/src/lib/ps2_recompiler.cpp b/ps2xRecomp/src/lib/ps2_recompiler.cpp
+index 8c1c7c5..939b9d7 100644
+--- a/ps2xRecomp/src/lib/ps2_recompiler.cpp
++++ b/ps2xRecomp/src/lib/ps2_recompiler.cpp
+@@ -848,6 +848,7 @@ namespace ps2recomp
+             m_skipFunctionStarts.clear();
+             m_stubFunctions.clear();
+             m_stubFunctionStarts.clear();
++            m_noStubFunctionStarts.clear();
+             m_stubHandlerBindingsByStart.clear();
+             m_entryPointHintStarts.clear();
+             m_correctnessCriticalFunctionStarts.clear();
+@@ -866,6 +867,13 @@ namespace ps2recomp
+             }
+             for (const auto &name : m_config.stubImplementations)
+             {
++                if (!name.empty() && name[0] == '-')
++                {
++                    const FunctionSelector selector = parseFunctionSelector(name.substr(1));
++                    if (selector.start.has_value())
++                        m_noStubFunctionStarts.insert(*selector.start);
++                    continue;
++                }
+                 const FunctionSelector selector = parseFunctionSelector(name);
+                 if (!selector.name.empty())
+                 {
+@@ -2221,6 +2229,10 @@ namespace ps2recomp
+ 
+     bool PS2Recompiler::isStubFunction(const Function &function) const
+     {
++        if (m_noStubFunctionStarts.contains(function.start))
++        {
++            return false;
++        }
+         if (m_stubFunctionStarts.contains(function.start))
+         {
+             return true;
+diff --git a/ps2xRecomp/src/lib/vu_translation_helpers.cpp b/ps2xRecomp/src/lib/vu_translation_helpers.cpp
+index 71243e7..b60fcdc 100644
+--- a/ps2xRecomp/src/lib/vu_translation_helpers.cpp
++++ b/ps2xRecomp/src/lib/vu_translation_helpers.cpp
+@@ -115,14 +115,64 @@ namespace ps2recomp
+                            inst.rt, inst.rt);
+     }
+ 
++    namespace
++    {
++        // VU0 macro-mode memory instructions address VU0 data memory: 4 KB at 0x11004000 as the EE sees it,
++        // one quadword per VI unit (the address wraps inside the 4 KB)
++        std::string vu0QwordAddress(uint32_t vi)
++        {
++            return fmt::format("(0x11004000u + ((uint32_t)(ctx->vi[{}] & 0xFFu) << 4))", vi);
++        }
++
++        std::string blendMask(uint8_t destMask)
++        {
++            return fmt::format("_mm_castsi128_ps(_mm_set_epi32({}, {}, {}, {}))", (destMask & 0x1) ? -1 : 0,
++                               (destMask & 0x2) ? -1 : 0, (destMask & 0x4) ? -1 : 0, (destMask & 0x8) ? -1 : 0);
++        }
++
++        // vi0 is always 0: post-increment / pre-decrement of vi0 changes nothing
++        std::string stepVi(uint32_t vi, int delta)
++        {
++            if (vi == 0)
++                return "";
++            return fmt::format("ctx->vi[{}] = (uint16_t)(ctx->vi[{}] {} 1); ", vi, vi, delta > 0 ? '+' : '-');
++        }
++
++        std::string loadQword(uint32_t vft, uint32_t vis, uint8_t destMask)
++        {
++            if (vft == 0) // vf0 is constant: the load only reads memory
++                return "";
++            return fmt::format("ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], _mm_castsi128_ps(READ128({})), {}); ", vft,
++                               vft, vu0QwordAddress(vis), blendMask(destMask));
++        }
++
++        std::string storeQword(uint32_t vfs, uint32_t vit, uint8_t destMask)
++        {
++            return fmt::format("{{ const uint32_t addr = {}; WRITE128(addr, _mm_castps_si128(_mm_blendv_ps(_mm_castsi128_ps(READ128(addr)), "
++                               "ctx->vu0_vf[{}], {}))); }} ",
++                               vu0QwordAddress(vit), vfs, blendMask(destMask));
++        }
++    }
++
+     std::string CodeGenerator::translateVU_VILWR(const Instruction &inst)
+     {
+-        return fmt::format("{{ uint32_t addr = (uint32_t)(ctx->vi[{}] << 2) & 0x3FFC; ctx->vi[{}] = static_cast<uint16_t>(READ32(addr)); }}", inst.rd, inst.rt); // VILWR.<f> vit, (vis)
++        // VILWR.dest vit, (vis): the low 16 bits of the dest field (one of x/y/z/w) of the quadword at vis
++        if (inst.rt == 0)
++            return "{ }";
++        const uint8_t dest = inst.vectorInfo.vectorField;
++        const uint32_t field = (dest & 0x8) ? 0u : (dest & 0x4) ? 1u : (dest & 0x2) ? 2u : 3u;
++        return fmt::format("{{ ctx->vi[{}] = (uint16_t)READ32({} + {}u); }}", inst.rt, vu0QwordAddress(inst.rd), field * 4u);
+     }
+ 
+     std::string CodeGenerator::translateVU_VISWR(const Instruction &inst)
+     {
+-        return fmt::format("{{ uint32_t addr = (uint32_t)(ctx->vi[{}] << 2) & 0x3FFC; WRITE32(addr, (uint32_t)ctx->vi[{}]); }}", inst.rd, inst.rt); // VISWR.<f> vit, (vis)
++        // VISWR.dest vit, (vis): vit (zero-extended) into each dest field of the quadword at vis
++        const uint8_t dest = inst.vectorInfo.vectorField;
++        std::string code = "{ ";
++        for (uint32_t field = 0; field < 4u; ++field)
++            if (dest & (0x8u >> field))
++                code += fmt::format("WRITE32({} + {}u, (uint32_t)(uint16_t)ctx->vi[{}]); ", vu0QwordAddress(inst.rd), field * 4u, inst.rt);
++        return code + "}";
+     }
+ 
+     std::string CodeGenerator::translateVU_VIADD(const Instruction &inst)
+@@ -771,66 +821,26 @@ namespace ps2recomp
+ 
+     std::string CodeGenerator::translateVU_VLQI(const Instruction &inst)
+     {
+-        uint8_t vis = inst.rd;
+-        uint8_t dest_mask = inst.vectorInfo.vectorField;
+-        return fmt::format("{{ uint32_t addr = ((uint32_t)(ctx->vi[{}] & 0x3FF)) << 4; "
+-                           "__m128 res = _mm_castsi128_ps(READ128(addr)); "
+-                           "__m128i mask = _mm_set_epi32({}, {}, {}, {}); "
+-                           "ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], res, _mm_castsi128_ps(mask)); "
+-                           "ctx->vi[{}] = (ctx->vi[{}] + 1) & 0x3FF; }}",
+-                           vis,
+-                           (dest_mask & 0x1) ? -1 : 0, (dest_mask & 0x2) ? -1 : 0,
+-                           (dest_mask & 0x4) ? -1 : 0, (dest_mask & 0x8) ? -1 : 0,
+-                           inst.rt, inst.rt,
+-                           vis, vis);
++        // VLQI.dest vft, (vis++)
++        return "{ " + loadQword(inst.rt, inst.rd, inst.vectorInfo.vectorField) + stepVi(inst.rd, +1) + "}";
+     }
+ 
+     std::string CodeGenerator::translateVU_VSQI(const Instruction &inst)
+     {
+-        uint8_t vis = inst.rd;
+-        uint8_t dest_mask = inst.vectorInfo.vectorField;
+-        return fmt::format("{{ uint32_t addr = ((uint32_t)(ctx->vi[{}] & 0x3FF)) << 4; "
+-                           "__m128i old_val = READ128(addr); "
+-                           "__m128 res = _mm_blendv_ps(_mm_castsi128_ps(old_val), ctx->vu0_vf[{}], _mm_castsi128_ps(_mm_set_epi32({}, {}, {}, {}))); "
+-                           "WRITE128(addr, _mm_castps_si128(res)); "
+-                           "ctx->vi[{}] = (ctx->vi[{}] + 1) & 0x3FF; }}",
+-                           vis,
+-                           inst.rt,
+-                           (dest_mask & 0x1) ? -1 : 0, (dest_mask & 0x2) ? -1 : 0,
+-                           (dest_mask & 0x4) ? -1 : 0, (dest_mask & 0x8) ? -1 : 0,
+-                           vis, vis);
++        // VSQI.dest vfs, (vit++)
++        return "{ " + storeQword(inst.rd, inst.rt, inst.vectorInfo.vectorField) + stepVi(inst.rt, +1) + "}";
+     }
+ 
+     std::string CodeGenerator::translateVU_VLQD(const Instruction &inst)
+     {
+-        uint8_t vis = inst.rd;
+-        uint8_t dest_mask = inst.vectorInfo.vectorField;
+-        return fmt::format("{{ ctx->vi[{}] = (ctx->vi[{}] - 1) & 0x3FF; "
+-                           "uint32_t addr = ((uint32_t)(ctx->vi[{}] & 0x3FF)) << 4; "
+-                           "__m128 res = _mm_castsi128_ps(READ128(addr)); "
+-                           "__m128i mask = _mm_set_epi32({}, {}, {}, {}); "
+-                           "ctx->vu0_vf[{}] = _mm_blendv_ps(ctx->vu0_vf[{}], res, _mm_castsi128_ps(mask)); }}",
+-                           vis, vis,
+-                           vis,
+-                           (dest_mask & 0x1) ? -1 : 0, (dest_mask & 0x2) ? -1 : 0,
+-                           (dest_mask & 0x4) ? -1 : 0, (dest_mask & 0x8) ? -1 : 0,
+-                           inst.rt, inst.rt);
++        // VLQD.dest vft, (--vis)
++        return "{ " + stepVi(inst.rd, -1) + loadQword(inst.rt, inst.rd, inst.vectorInfo.vectorField) + "}";
+     }
+ 
+     std::string CodeGenerator::translateVU_VSQD(const Instruction &inst)
+     {
+-        uint8_t vis = inst.rd;
+-        uint8_t dest_mask = inst.vectorInfo.vectorField;
+-        return fmt::format("{{ ctx->vi[{}] = (ctx->vi[{}] - 1) & 0x3FF; "
+-                           "uint32_t addr = ((uint32_t)(ctx->vi[{}] & 0x3FF)) << 4; "
+-                           "__m128i old_val = READ128(addr); "
+-                           "__m128 res = _mm_blendv_ps(_mm_castsi128_ps(old_val), ctx->vu0_vf[{}], _mm_castsi128_ps(_mm_set_epi32({}, {}, {}, {}))); "
+-                           "WRITE128(addr, _mm_castps_si128(res)); }}",
+-                           vis, vis,
+-                           vis,
+-                           inst.rt,
+-                           (dest_mask & 0x1) ? -1 : 0, (dest_mask & 0x2) ? -1 : 0,
+-                           (dest_mask & 0x4) ? -1 : 0, (dest_mask & 0x8) ? -1 : 0);
++        // VSQD.dest vfs, (--vit)
++        return "{ " + stepVi(inst.rt, -1) + storeQword(inst.rd, inst.rt, inst.vectorInfo.vectorField) + "}";
+     }
+ 
+     std::string CodeGenerator::translateVU_VRGET(const Instruction &inst)
+diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
+index caa28b8..57e9924 100644
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -537,8 +537,8 @@ inline __m128i ps2_ppacb(__m128i rs, __m128i rt)
+ #define PS2_PPACB(a, b) ps2_ppacb((__m128i)(a), (__m128i)(b))
+ 
+ // Packed Interleave (PINT)
+-#define PS2_PINTH(a, b) _mm_unpacklo_epi16(_mm_shuffle_epi32((__m128i)(b), _MM_SHUFFLE(3, 2, 1, 0)), _mm_shuffle_epi32((__m128i)(a), _MM_SHUFFLE(3, 2, 1, 0)))
+-#define PS2_PINTEH(a, b) _mm_unpackhi_epi16(_mm_shuffle_epi32((__m128i)(b), _MM_SHUFFLE(3, 2, 1, 0)), _mm_shuffle_epi32((__m128i)(a), _MM_SHUFFLE(3, 2, 1, 0)))
++#define PS2_PINTH(a, b) _mm_unpacklo_epi16((__m128i)(b), _mm_unpackhi_epi64((__m128i)(a), (__m128i)(a)))
++#define PS2_PINTEH(a, b) _mm_or_si128(_mm_and_si128((__m128i)(b), _mm_set1_epi32(0xFFFF)), _mm_slli_epi32((__m128i)(a), 16))
+ 
+ // Packed Multiply-Add (PMADD)
+ #define PS2_PMADDW(a, b) _mm_add_epi32(_mm_mullo_epi32(_mm_shuffle_epi32((__m128i)(a), _MM_SHUFFLE(1, 0, 3, 2)), _mm_shuffle_epi32((__m128i)(b), _MM_SHUFFLE(1, 0, 3, 2))), _mm_mullo_epi32(_mm_shuffle_epi32((__m128i)(a), _MM_SHUFFLE(3, 2, 1, 0)), _mm_shuffle_epi32((__m128i)(b), _MM_SHUFFLE(3, 2, 1, 0))))
+@@ -735,9 +735,9 @@ inline __m128i ps2_qfsrv(__m128i rs, __m128i rt, uint32_t sa)
+ }
+ #define PS2_QFSRV(rs, rt, sa) ps2_qfsrv((__m128i)(rs), (__m128i)(rt), (uint32_t)(sa))
+ #define PS2_PCPYLD(rs, rt) _mm_unpacklo_epi64(rt, rs)
+-#define PS2_PEXEH(rs) _mm_shufflelo_epi16(_mm_shufflehi_epi16(rs, _MM_SHUFFLE(2, 3, 0, 1)), _MM_SHUFFLE(2, 3, 0, 1))
+-#define PS2_PEXEW(rs) _mm_shuffle_epi32(rs, _MM_SHUFFLE(2, 3, 0, 1))
+-#define PS2_PROT3W(rs) _mm_shuffle_epi32(rs, _MM_SHUFFLE(0, 3, 2, 1))
++#define PS2_PEXEH(rs) _mm_shufflelo_epi16(_mm_shufflehi_epi16(rs, _MM_SHUFFLE(3, 0, 1, 2)), _MM_SHUFFLE(3, 0, 1, 2))
++#define PS2_PEXEW(rs) _mm_shuffle_epi32(rs, _MM_SHUFFLE(3, 0, 1, 2))
++#define PS2_PROT3W(rs) _mm_shuffle_epi32(rs, _MM_SHUFFLE(3, 0, 2, 1))
+ 
+ // Additional VU0 operations
+ #define PS2_VSQRT(x) sqrtf(x)
+diff --git a/ps2xRuntime/include/runtime/ps2_vu1.h b/ps2xRuntime/include/runtime/ps2_vu1.h
+index 633a964..39ee925 100644
+--- a/ps2xRuntime/include/runtime/ps2_vu1.h
++++ b/ps2xRuntime/include/runtime/ps2_vu1.h
+@@ -126,6 +126,7 @@ private:
+         uint8_t upperVfShadowReg = 0;
+         uint8_t suppressedLowerVf = 0;
+         uint8_t lowerViWriteReg = 0; // the lowest VI register the lower instruction writes (0 = none)
++        bool macProducer = false;    // an FMAC instruction whose MAC flags an FMAND / FMEQ / FMOR can read (markMacProducers)
+ 
+         // Precomputed from the two usages for the stall check and the write marking (same rules, no loops over
+         // every register / lane per pair).
+@@ -310,6 +311,9 @@ private:
+     uint64_t m_cachedCodeGeneration = 0;
+     bool m_decodedCodeCacheValid = false;
+     bool m_codeReadsMacStatus = true; // the decoded code has FSEQ / FSAND / FSOR / FMEQ / FMAND / FMOR
++    bool m_codeReadsStatus = true;    // ... FSEQ / FSAND / FSOR (the sticky status bits: every FMAC instruction counts)
++    // After a decode: m_codeReadsMacStatus / m_codeReadsStatus and each pair's macProducer.
++    void markMacProducers(uint32_t pairCount);
+     // Compiled VU1 code (runtime/ps2_vu1_compiled.h): per pair, the compiled function to enter there for the code
+     // now in VU memory (nullptr = interpret); refreshed with the decode cache.
+     std::array<Vu1CompiledFn, kMaxDecodedPairs> m_compiledFnAt{};
+@@ -406,9 +410,13 @@ private:
+     // Fast mode: the common upper instructions without the MAC / status flag work (only when the code in VU
+     // memory never reads those flags) and with only the lanes they use; false = not handled, use execUpper.
+     bool execUpperFast(uint32_t instr);
+-    void runUpper(uint32_t instr)
++    // execUpperFast, then the MAC flags taken from its result (for a macProducer pair)
++    bool execUpperFastMac(uint32_t instr);
++    // Fast mode while the code reads no status flags; an instruction whose MAC flags the code can read still queues them.
++    void runUpper(uint32_t instr, bool macProducer = false)
+     {
+-        if (!(m_fastMode && m_decodedCodeCacheValid && !m_codeReadsMacStatus && execUpperFast(instr)))
++        if (!(m_fastMode && m_decodedCodeCacheValid && !m_codeReadsStatus &&
++              (macProducer ? execUpperFastMac(instr) : execUpperFast(instr))))
+             execUpper(instr);
+     }
+     void execLower(uint32_t instr, uint8_t *vuData, uint32_t dataSize, GS &gs, PS2Memory *memory, uint32_t upperInstr);
+diff --git a/ps2xRuntime/include/runtime/ps2_vu1_compiled.h b/ps2xRuntime/include/runtime/ps2_vu1_compiled.h
+index 0d3a76a..fe79752 100644
+--- a/ps2xRuntime/include/runtime/ps2_vu1_compiled.h
++++ b/ps2xRuntime/include/runtime/ps2_vu1_compiled.h
+@@ -64,6 +64,9 @@ struct Vu1CompiledPiece
+     const Vu1CompiledFn *fns;   // per pair: the function to enter there (nullptr = not compiled, the interpreter runs it)
+     const Vu1PairShape *shapes; // per pair
+     const char *name;
++    // the generator ran every FMAC instruction whose MAC flags an FMAND / FMEQ / FMOR can read on the interpreter's
++    // exact path: usable while VU code reads the MAC flags (never while it reads the status flags)
++    bool macFlagsExact = false;
+ };
+ 
+ // Called by the generated code's static initialiser.
+@@ -556,6 +559,13 @@ struct Vu1Compiled
+ 
+     // the instructions the generator leaves to the interpreter
+     static void runUpper(VU1Interpreter &vu, uint32_t instr) { vu.runUpper(instr); }
++    // An FMAC instruction whose MAC flags an FMAND / FMEQ / FMOR can read (Vu1CompiledPiece::macFlagsExact): the
++    // fast-mode result and the MAC flags taken from it (VU1Interpreter::execUpperFastMac).
++    static void runUpperMac(VU1Interpreter &vu, uint32_t instr)
++    {
++        if (!vu.execUpperFastMac(instr))
++            vu.execUpper(instr);
++    }
+     static void execLower(VU1Interpreter &vu, uint32_t instr, uint32_t upper)
+     {
+         vu.execLower(instr, vu.m_activeVuData, vu.m_activeVuDataSize, *vu.m_activeGs, vu.m_activeMemory, upper);
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+index 7f6516f..c2f6c35 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+@@ -326,6 +326,83 @@ namespace
+         }
+     }
+ 
++    bool readHostRange(const std::filesystem::path &path, uint64_t offsetBytes, uint8_t *dst, size_t byteCount);
++
++    // Looks a path up in the ISO9660 directory of the configured disc image (PS2X_CD_IMAGE): the file's real first
++    // sector and size, the same sectors the IOP's cdvdman reads from that image.
++    bool findCdImageFile(const std::string &ps2Path, uint32_t &lbnOut, uint32_t &sizeOut)
++    {
++        const std::filesystem::path image = getCdImagePath();
++        if (image.empty())
++        {
++            return false;
++        }
++        std::array<uint8_t, kCdSectorSize> pvd{};
++        if (!readHostRange(image, 16ull * kCdSectorSize, pvd.data(), pvd.size()) || std::memcmp(pvd.data() + 1, "CD001", 5) != 0)
++        {
++            return false;
++        }
++        uint32_t dirLbn = 0u, dirSize = 0u;
++        std::memcpy(&dirLbn, pvd.data() + 156 + 2, 4);
++        std::memcpy(&dirSize, pvd.data() + 156 + 10, 4);
++
++        std::string path = normalizeCdPathNoPrefix(ps2Path);
++        std::vector<std::string> parts;
++        for (size_t start = 0u; start <= path.size();)
++        {
++            const size_t end = std::min(path.find_first_of("/\\", start), path.size());
++            std::string part = toLowerAscii(path.substr(start, end - start));
++            part = part.substr(0, part.find(';'));
++            if (!part.empty())
++                parts.push_back(part);
++            start = end + 1u;
++        }
++        if (parts.empty() || dirSize > (1u << 20))
++        {
++            return false;
++        }
++        for (size_t i = 0u; i < parts.size(); ++i)
++        {
++            std::vector<uint8_t> dir(dirSize);
++            if (!readHostRange(image, static_cast<uint64_t>(dirLbn) * kCdSectorSize, dir.data(), dir.size()))
++            {
++                return false;
++            }
++            bool found = false;
++            for (size_t pos = 0u; pos < dir.size();)
++            {
++                const uint8_t length = dir[pos];
++                if (length == 0u) // records never cross a sector: skip to the next one
++                {
++                    pos = (pos / kCdSectorSize + 1u) * kCdSectorSize;
++                    continue;
++                }
++                if (pos + length > dir.size() || length < 34u)
++                {
++                    break;
++                }
++                const uint8_t nameLength = dir[pos + 32];
++                std::string name = toLowerAscii(std::string(reinterpret_cast<const char *>(&dir[pos + 33]), nameLength));
++                name = name.substr(0, name.find(';'));
++                if (name == parts[i] && ((dir[pos + 25] & 2u) != 0u) == (i + 1u < parts.size()))
++                {
++                    std::memcpy(&dirLbn, &dir[pos + 2], 4);
++                    std::memcpy(&dirSize, &dir[pos + 10], 4);
++                    found = true;
++                    break;
++                }
++                pos += length;
++            }
++            if (!found)
++            {
++                return false;
++            }
++        }
++        lbnOut = dirLbn;
++        sizeOut = dirSize;
++        return true;
++    }
++
+     bool registerCdFile(const std::string &ps2Path, CdFileEntry &entryOut)
+     {
+         const std::string key = cdPathKey(ps2Path);
+@@ -343,6 +420,21 @@ namespace
+             return true;
+         }
+ 
++        // With a disc image, the real sectors: the game passes them to IOP modules (e.g. a CD arbiter) that read the
++        // image through cdvdman, so a pseudo LBN from the loose files would point them at nothing. Not added to
++        // g_cdFilesByKey, so sceCdRead finds no loose entry and reads these sectors from the image.
++        uint32_t imageLbn = 0u;
++        uint32_t imageSize = 0u;
++        if (findCdImageFile(ps2Path, imageLbn, imageSize))
++        {
++            entryOut.hostPath = getCdImagePath();
++            entryOut.sizeBytes = imageSize;
++            entryOut.baseLbn = imageLbn;
++            entryOut.sectors = sectorsForBytes(imageSize);
++            g_lastCdError = 0;
++            return true;
++        }
++
+         const std::filesystem::path root = getCdRootPath();
+         std::filesystem::path path = cdHostPath(ps2Path);
+         std::error_code ec;
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
+index 78877f4..84cb8f6 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/MemoryCard.cpp
+@@ -1,6 +1,16 @@
+ #include "Common.h"
+ #include "MemoryCard.h"
+ 
++// The per-call memory-card traces only with VENDETTA_MCLOG: games poll the card every few frames, and an unbuffered
++// line each time held the game thread on the console / log file write (hitches in play, the sound gapping with them).
++#define MC_TRACE(x)                                                    \
++    do                                                                 \
++    {                                                                  \
++        static const bool mcTrace = std::getenv("VENDETTA_MCLOG") != nullptr; \
++        if (mcTrace)                                                   \
++            RUNTIME_LOG(x);                                            \
++    } while (0)
++
+ namespace ps2_stubs
+ {
+     namespace
+@@ -573,7 +583,7 @@ namespace ps2_stubs
+             setMcCommandResultLocked(kMcCmdChdir, result);
+         }
+ 
+-        RUNTIME_LOG("[MC] Chdir port=" << port << " '" << requestedDir
++        MC_TRACE("[MC] Chdir port=" << port << " '" << requestedDir
+                                        << "' -> result=" << result << " cwd='" << currentDir << "'");
+         writeMcCString(rdram, currentDirAddr, currentDir);
+         setReturnS32(ctx, 0);
+@@ -862,7 +872,7 @@ namespace ps2_stubs
+ 
+             setMcCommandResultLocked(kMcCmdGetDir, result);
+         }
+-        RUNTIME_LOG("[MC] GetDir port=" << port << " '" << rawPath
++        MC_TRACE("[MC] GetDir port=" << port << " '" << rawPath
+                                         << "' maxent=" << maxEntries << " -> result=" << result);
+         setReturnS32(ctx, 0);
+     }
+@@ -928,7 +938,7 @@ namespace ps2_stubs
+             }
+         }
+ 
+-        RUNTIME_LOG("[MC] GetInfo port=" << port << " type=" << cardType
++        MC_TRACE("[MC] GetInfo port=" << port << " type=" << cardType
+                                          << " free=" << freeBlocks << " format=" << format
+                                          << " result=" << result);
+         setReturnS32(ctx, 0);
+@@ -1243,7 +1253,7 @@ namespace ps2_stubs
+             return;
+         }
+ 
+-        RUNTIME_LOG("[MC] Sync cmd=" << cmd << " result=" << result);
++        MC_TRACE("[MC] Sync cmd=" << cmd << " result=" << result);
+ 
+         if (cmdPtr != 0u)
+         {
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Dispatcher.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/Dispatcher.cpp
+index 121fcc7..c8c01de 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Dispatcher.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Dispatcher.cpp
+@@ -314,6 +314,15 @@ namespace ps2_syscalls
+         case 0x7F:
+             GetMemorySize(rdram, ctx, runtime);
+             return true;
++        case 0x80: // GetGsDxDyOffset(mode, &dx, &dy, &dw, &dh): libgraph's display offsets for newer consoles.
++            // The host has no model-specific CRTC offsets: zero, the same values libgraph uses on early models.
++            for (int reg = 5; reg <= 8; ++reg)
++            {
++                if (uint8_t *out = getMemPtr(rdram, getRegU32(ctx, reg)))
++                    std::memset(out, 0, sizeof(int32_t));
++            }
++            setReturnS32(ctx, 0);
++            return true;
+         case 0x82:
+             InitTLB(rdram, ctx, runtime);
+             return true;
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+index c31c24f..a6dd730 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+@@ -480,6 +480,9 @@ namespace ps2_syscalls
+         setReturnS32(ctx, 0);
+     }
+ 
++    // Bottom of the main thread's stack (SetupThread): the heap may grow up to it, as on the console.
++    static uint32_t g_mainStackBase = 0u;
++
+     // 0x3C SetupThread
+     // args: $a0 = gp, $a1 = stack, $a2 = stack_size, $a3 = args, $t0 = root_func
+     void SetupThread(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+@@ -531,6 +534,7 @@ namespace ps2_syscalls
+         }
+ 
+         scheduler.setupCurrentThread(initialStack, stackSize, getRegU32(ctx, 28));
++        g_mainStackBase = initialStack;
+         setReturnU32(ctx, sp);
+     }
+ 
+@@ -543,18 +547,21 @@ namespace ps2_syscalls
+         const uint32_t heapBase = (heapBaseRaw + 0xFu) & ~0xFu;
+ 
+         // Silent Hill and other games often pass -1 (0xFFFFFFFF) to mean "rest of RAM".
++        // "Rest of RAM" ends at the main stack's bottom, as the kernel's EndOfHeap does (Ben 10's newlib heap needs
++        // the megabyte above 0x1F00000; with that cap its malloc failed and the game used a null table).
+         static constexpr uint32_t kDefaultGuestHeapEnd = 0x01F00000u;
+-        uint32_t heapLimit = kDefaultGuestHeapEnd;
++        const uint32_t restOfRam = g_mainStackBase > heapBase ? g_mainStackBase : kDefaultGuestHeapEnd;
++        uint32_t heapLimit = restOfRam;
+ 
+         if (heapSize != 0u && heapSize != 0xFFFFFFFFu)
+         {
+             const uint64_t candidate = static_cast<uint64_t>(heapBase) + static_cast<uint64_t>(heapSize);
+-            heapLimit = static_cast<uint32_t>(std::min<uint64_t>(candidate, kDefaultGuestHeapEnd));
++            heapLimit = static_cast<uint32_t>(std::min<uint64_t>(candidate, restOfRam));
+         }
+ 
+         if (heapLimit <= heapBase)
+         {
+-            heapLimit = kDefaultGuestHeapEnd;
++            heapLimit = restOfRam;
+         }
+ 
+         if (runtime)
+diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+index d692837..75bee5d 100644
+--- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+@@ -2172,6 +2172,55 @@ void GS::vertexKick(bool drawing)
+     if (drawing && m_backend)
+     {
+         GSPrimitiveBatch batch = buildDrawBatch(needed);
++        {
++            // PS2X_DRAWLOG=<from s>,<to s>: every primitive drawn in that window (seconds after the first draw), one
++            // line each with its GIF path, drawing state and vertices (which pass of an effect draws what, and how).
++            // Kept in memory and written to drawlog.txt once the window ends, so logging does not slow the game.
++            static const auto window = []
++            {
++                double w[2] = {-1.0, -1.0};
++                if (const char *v = std::getenv("PS2X_DRAWLOG"))
++                    std::sscanf(v, "%lf,%lf", &w[0], &w[1]);
++                return std::array<double, 2>{w[0], w[1]};
++            }();
++            static const auto start = std::chrono::steady_clock::now();
++            static std::string drawLog;
++            if (window[1] > 0.0)
++            {
++                const double now = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
++                if (now >= window[0] && now < window[1])
++                {
++                    const GSDrawState &s = batch.state;
++                    const GSContext &c = s.context;
++                    char line[512];
++                    extern uint32_t g_vu1LastStartPc;
++                    std::snprintf(line, sizeof(line), "%.4f vu%04x p%u t%u c%u tme%u abe%u fge%u fst%u fb=%x/%u/%x msk=%08x z=%x/%x/%u test=%llx alpha=%llx fba=%llu pabe=%u tex=%x/%x/%u",
++                                  now, g_vu1LastStartPc, s_hudPath, static_cast<unsigned>(s.prim.type), s.prim.ctxt, s.prim.tme, s.prim.abe, s.prim.fge, s.prim.fst,
++                                  c.frame.fbp, c.frame.fbw, c.frame.psm, c.frame.fbmsk, c.zbuf.zbp, c.zbuf.psm, c.zbuf.zmask ? 1u : 0u,
++                                  static_cast<unsigned long long>(c.test), static_cast<unsigned long long>(c.alpha),
++                                  static_cast<unsigned long long>(c.fba), s.pabe ? 1u : 0u, c.tex0.tbp0, c.tex0.psm, c.tex0.tfx);
++                    drawLog += line;
++                    for (uint32_t i = 0; i < batch.vertexCount; ++i)
++                    {
++                        const GSVertex &v = batch.vertices[i];
++                        std::snprintf(line, sizeof(line), " | %.1f,%.1f,%.0f %u,%u,%u,%u", v.x - c.xyoffset.ofx / 16.0f,
++                                      v.y - c.xyoffset.ofy / 16.0f, v.z, v.r, v.g, v.b, v.a);
++                        drawLog += line;
++                    }
++                    drawLog += static_cast<char>(10);
++                }
++                else if (now >= window[1] && !drawLog.empty())
++                {
++                    if (FILE *f = std::fopen("drawlog.txt", "wb"))
++                    {
++                        std::fwrite(drawLog.data(), 1, drawLog.size(), f);
++                        std::fclose(f);
++                    }
++                    drawLog.clear();
++                    drawLog.shrink_to_fit();
++                }
++            }
++        }
+         if (s_hudLog.phase != HudLog::Off)
+             hudLogPrimitive(batch);
+         if (m_packetData && m_overlayRule && m_overlayRule(batch.state))
+diff --git a/ps2xRuntime/src/lib/gs/gs_gpu_none.cpp b/ps2xRuntime/src/lib/gs/gs_gpu_none.cpp
+index 39dc2de..ad934d5 100644
+--- a/ps2xRuntime/src/lib/gs/gs_gpu_none.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_gpu_none.cpp
+@@ -11,3 +11,7 @@ std::unique_ptr<GSGpuRenderer> makeGpuRenderer(const GSGpuOptions &, std::string
+ void gsSetPresentOverlay(uint32_t, uint32_t, std::vector<uint32_t>, double) {}
+ void gsClearPresentOverlay() {}
+ bool gsPresentOverlayAvailable() { return false; }
++
++// The debug panel hands its ImGui frame to the Vulkan present; without it the panel draws through raylib.
++struct ImDrawData;
++void setPresentUi(ImDrawData *) {}
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 9ffc580..a5c2722 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1887,6 +1887,31 @@ void PS2Runtime::executeVU0Microprogram(uint8_t *rdram, R5900Context *ctx, uint3
+         return;
+     }
+ 
++    // PS2X_VU0DUMP=<pc hex>: the VU0 code and data memory as the first VCALLMS to that address starts
++    // (vu0dump_code.bin, vu0dump_data.bin), to read the game's VU0 microprograms
++    static const long vu0DumpPc = []
++    {
++        const char *v = std::getenv("PS2X_VU0DUMP");
++        return v ? std::strtol(v, nullptr, 16) : -1L;
++    }();
++    if (vu0DumpPc >= 0 && static_cast<uint32_t>(vu0DumpPc) == startPC)
++    {
++        static bool dumped = false;
++        if (!dumped)
++        {
++            dumped = true;
++            if (FILE *f = std::fopen("vu0dump_code.bin", "wb"))
++            {
++                std::fwrite(vu0Code, 1, PS2_VU0_CODE_SIZE, f);
++                std::fclose(f);
++            }
++            if (FILE *f = std::fopen("vu0dump_data.bin", "wb"))
++            {
++                std::fwrite(vu0Data, 1, PS2_VU0_DATA_SIZE, f);
++                std::fclose(f);
++            }
++        }
++    }
+     m_vu0.reset();
+     copyVu0ContextToState(ctx, m_vu0.state());
+     m_vu0.execute(vu0Code, PS2_VU0_CODE_SIZE,
+@@ -2078,7 +2103,9 @@ uint32_t PS2Runtime::clampGuestHeapBase(uint32_t guestBase) const
+ 
+ uint32_t PS2Runtime::clampGuestHeapLimit(uint32_t guestLimit) const
+ {
+-    const uint32_t hardLimit = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
++    // An explicit limit may reach the main stack (SetupHeap passes its base): the runtime's own guest structures live
++    // in kernel RAM now, so nothing else uses 0x1F00000+. Without one, the old 0x1F00000 default stays.
++    const uint32_t hardLimit = guestLimit == 0u ? std::min(kGuestHeapHardLimit, PS2_RAM_SIZE) : PS2_RAM_SIZE;
+     if (guestLimit == 0u || guestLimit > hardLimit)
+     {
+         return hardLimit;
+@@ -2984,7 +3011,9 @@ void PS2Runtime::run()
+     uint64_t tick = 0;
+     while (!isStopRequested() && !gameThreadFinished.load(std::memory_order_acquire))
+     {
+-        PS2_IF_AGRESSIVE_LOGS({
++        // PS2X_TICK_LOG: where the game thread is, every 120 host frames (was compiled in only with aggressive logs).
++        static const bool s_tickLog = std::getenv("PS2X_TICK_LOG") != nullptr;
++        if (s_tickLog) {
+             tick++;
+             if ((tick % 120) == 0)
+             {
+@@ -2999,23 +3028,14 @@ void PS2Runtime::run()
+                 const uint32_t dbgGp = m_debugGp.load(std::memory_order_relaxed);
+                 const auto eeSnapshot = m_eeScheduler->snapshot();
+ 
+-                RUNTIME_LOG("[run:tick] tick=" << tick
+-                                               << " pc=0x" << std::hex << dbgPc
+-                                               << " ra=0x" << dbgRa
+-                                               << " sp=0x" << dbgSp
+-                                               << " gp=0x" << dbgGp
+-                                               << " dispfb1=0x" << gs.dispfb1
+-                                               << " display1=0x" << gs.display1
+-                                               << std::dec
+-                                               << " activeThreads=" << eeSnapshot.threads.size()
+-                                               << " dma=" << curDma
+-                                               << " gif=" << curGif
+-                                               << " gsw=" << curGs
+-                                               << " vif=" << curVif
+-                                               << std::endl);
++                std::fprintf(stderr, "[run:tick] tick=%u pc=0x%x ra=0x%x sp=0x%x threads=%zu dma=%llu gif=%llu vif=%llu\n",
++                             static_cast<unsigned>(tick), dbgPc, dbgRa, dbgSp, eeSnapshot.threads.size(),
++                             static_cast<unsigned long long>(curDma), static_cast<unsigned long long>(curGif),
++                             static_cast<unsigned long long>(curVif));
++                (void)dbgGp; (void)curGs; (void)gs;
+ 
+             }
+-        });
++        }
+         uint32_t presentWidth = FB_WIDTH;
+         uint32_t presentHeight = DEFAULT_DISPLAY_HEIGHT;
+         // The window shows each picture once, as soon as the game has finished it: it waits for a new one (up to
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+index f7631d3..3ce0e8b 100644
+--- a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+@@ -11,7 +11,10 @@
+ #include "runtime/ps2_vu_code_log.h"
+ #include "ps2_vu1_detail.h"
+ 
++uint32_t g_vu1LastStartPc = 0; // start address of the last VU1 microprogram run (PS2X_DRAWLOG)
++
+ #include <algorithm>
++#include <chrono>
+ #include <cfenv>
+ #include <cmath>
+ #include <cstdio>
+@@ -1795,6 +1798,36 @@ namespace
+         return opHi == 0x14u || opHi == 0x16u || opHi == 0x17u || opHi == 0x18u || opHi == 0x1Au || opHi == 0x1Bu;
+     }
+ 
++    // The upper instruction updates the MAC flags (applyFmacDest / applyFmacDestAcc in execUpper): ADD / SUB / MADD /
++    // MSUB / MUL in all their forms, OPMSUB / OPMULA (not MAX / MINI / ITOF / FTOI / ABS / CLIP / NOP).
++    bool upperWritesMac(uint32_t upper)
++    {
++        const uint32_t op = upper & 0x3Fu;
++        const uint32_t k = op < 0x3Cu ? op : ((upper & 3u) | ((upper >> 4) & 0x7Cu));
++        return k <= 0x0Fu || (k >= 0x18u && k <= 0x1Cu) || k == 0x1Eu || (k >= 0x20u && k <= 0x2Au) ||
++               (k >= 0x2Cu && k <= 0x2Eu);
++    }
++
++    // Compiled code does not compute the MAC / status flags (fast mode). While VU code memory reads the status flags no
++    // piece is usable; while it reads the MAC flags only pieces made for it (macFlagsExact).
++    bool pieceFlagsUsable(const Vu1CompiledPiece &piece, const uint8_t *vuCode, uint32_t codeSize)
++    {
++        bool readsMac = false;
++        for (uint32_t at = 0; at + 8u <= codeSize; at += 8u)
++        {
++            uint32_t lower = 0u, upper = 0u;
++            std::memcpy(&lower, vuCode + at, 4u);
++            std::memcpy(&upper, vuCode + at + 4u, 4u);
++            if ((upper & 0x80000000u) != 0u)
++                continue;
++            const uint32_t opHi = (lower >> 25) & 0x7Fu;
++            if (opHi == 0x14u || opHi == 0x16u || opHi == 0x17u)
++                return false;
++            readsMac = readsMac || opHi == 0x18u || opHi == 0x1Au || opHi == 0x1Bu;
++        }
++        return !readsMac || piece.macFlagsExact;
++    }
++
+     struct RegisteredVu1Piece
+     {
+         const Vu1CompiledPiece *piece = nullptr;
+@@ -1843,7 +1876,8 @@ namespace
+             const Vu1CompiledPiece &piece = *entry.piece;
+             const uint32_t start = piece.vuAddress / 8u;
+             if (start >= high || start + piece.pairCount <= low || entry.state < 0 ||
+-                !pieceInPlace(piece, vuCode, codeSize, static_cast<uint32_t>(N)) || !accept(entry))
++                !pieceInPlace(piece, vuCode, codeSize, static_cast<uint32_t>(N)) ||
++                !pieceFlagsUsable(piece, vuCode, codeSize) || !accept(entry))
+                 continue;
+             for (uint32_t index = 0; index < piece.pairCount; ++index)
+             {
+@@ -1860,13 +1894,9 @@ void VU1Interpreter::rebuildDecodedCodeCache(const uint8_t *vuCode, uint32_t cod
+ {
+     ps2_host_profile::count(ps2_host_profile::Vu1DecodeFull);
+     const uint32_t pairCount = std::min<uint32_t>(codeSize / 8u, kMaxDecodedPairs);
+-    bool readsMacStatus = false;
+     for (uint32_t i = 0; i < pairCount; ++i)
+-    {
+         m_decodedCodeCache[i] = decodeInstructionPair(vuCode, i * 8u);
+-        readsMacStatus = readsMacStatus || pairReadsMacStatus(m_decodedCodeCache[i].lower, m_decodedCodeCache[i].iBit);
+-    }
+-    m_codeReadsMacStatus = readsMacStatus;
++    markMacProducers(pairCount);
+ 
+     m_cachedVuCode = vuCode;
+     m_cachedMemory = memory;
+@@ -1876,6 +1906,75 @@ void VU1Interpreter::rebuildDecodedCodeCache(const uint8_t *vuCode, uint32_t cod
+     refreshCompiledEntries(vuCode, codeSize);
+ }
+ 
++// A MAC flag reader (FMEQ / FMAND / FMOR) sees the flags of the latest FMAC instruction issued at least 4 cycles
++// before it (kFmacLatency). Fast mode does not compute them, so the FMAC instructions that can be that one are marked
++// macProducer: they queue their MAC flags, the rest keeps the fast path. Walking back from each reader (through the
++// branches to it), every pair is at least one cycle earlier than the next, so it is any writer less than 4 pairs back
++// (stalls may have pushed it 4 cycles back) or the first writer 4 or more pairs back, where that path stops.
++// While the code reads the status flags (sticky: every FMAC instruction counts) fast mode is off.
++void VU1Interpreter::markMacProducers(uint32_t pairCount)
++{
++    constexpr uint8_t kSurelyVisible = 4u, kMaxWalk = 64u; // pairs back
++    static thread_local std::vector<std::pair<uint32_t, uint32_t>> branches; // (target pair, delay-slot pair)
++    static thread_local std::vector<uint8_t> fewestBack;
++    static thread_local std::vector<std::pair<uint32_t, uint8_t>> stack;
++    branches.clear();
++    stack.clear();
++    bool readsMac = false, readsStatus = false;
++    for (uint32_t i = 0; i < pairCount; ++i)
++    {
++        DecodedInstructionPair &pair = m_decodedCodeCache[i];
++        pair.macProducer = false;
++        if (pair.iBit)
++            continue;
++        const uint32_t opHi = (pair.lower >> 25) & 0x7Fu;
++        readsStatus = readsStatus || opHi == 0x14u || opHi == 0x16u || opHi == 0x17u;
++        readsMac = readsMac || opHi == 0x18u || opHi == 0x1Au || opHi == 0x1Bu;
++        if (opHi == 0x20u || opHi == 0x21u || opHi == 0x28u || opHi == 0x29u || (opHi >= 0x2Cu && opHi <= 0x2Fu))
++        {
++            const int32_t imm11 = static_cast<int32_t>(pair.lower << 21) >> 21; // B / BAL / IBxx
++            branches.emplace_back(static_cast<uint32_t>(static_cast<int32_t>(i) + 1 + imm11) & (pairCount - 1u),
++                                  (i + 1u) & (pairCount - 1u));
++        }
++    }
++    m_codeReadsStatus = readsStatus;
++    m_codeReadsMacStatus = readsMac || readsStatus;
++    if (!readsMac || readsStatus)
++        return;
++
++    const auto pushPredecessors = [&](uint32_t at, uint8_t back)
++    {
++        if (at > 0u)
++            stack.emplace_back(at - 1u, back);
++        for (const auto &[target, delaySlot] : branches)
++            if (target == at)
++                stack.emplace_back(delaySlot, back);
++    };
++    for (uint32_t i = 0; i < pairCount; ++i)
++    {
++        const DecodedInstructionPair &pair = m_decodedCodeCache[i];
++        const uint32_t opHi = (pair.lower >> 25) & 0x7Fu;
++        if (!pair.iBit && (opHi == 0x18u || opHi == 0x1Au || opHi == 0x1Bu))
++            pushPredecessors(i, 1u);
++    }
++    fewestBack.assign(pairCount, 0xFFu);
++    while (!stack.empty())
++    {
++        const auto [at, back] = stack.back();
++        stack.pop_back();
++        if (back > kMaxWalk || back >= fewestBack[at])
++            continue;
++        fewestBack[at] = back; // a shorter way here sees at least as much as a longer one
++        if (upperWritesMac(m_decodedCodeCache[at].upper))
++        {
++            m_decodedCodeCache[at].macProducer = true;
++            if (back >= kSurelyVisible)
++                continue;
++        }
++        pushPredecessors(at, static_cast<uint8_t>(back + 1u));
++    }
++}
++
+ bool VU1Interpreter::ensureDecodedCodeCache(const uint8_t *vuCode, uint32_t codeSize, PS2Memory *memory)
+ {
+     const bool trackedCode = memory != nullptr &&
+@@ -1906,10 +2005,7 @@ bool VU1Interpreter::ensureDecodedCodeCache(const uint8_t *vuCode, uint32_t code
+             const uint32_t last = std::min((end + 7u) / 8u, pairCount);
+             for (uint32_t i = first; i < last; ++i)
+                 m_decodedCodeCache[i] = decodeInstructionPair(vuCode, i * 8u);
+-            bool readsMacStatus = false;
+-            for (uint32_t i = 0; i < pairCount && !readsMacStatus; ++i)
+-                readsMacStatus = pairReadsMacStatus(m_decodedCodeCache[i].lower, m_decodedCodeCache[i].iBit);
+-            m_codeReadsMacStatus = readsMacStatus;
++            markMacProducers(pairCount);
+             m_cachedCodeGeneration = generation;
+             if (first < last && m_compiledEnabled && m_unit == Unit::VU1)
+                 refreshCompiledRange(m_compiledFnAt, vuCode, codeSize, first, last, [this](RegisteredVu1Piece &entry)
+@@ -2012,12 +2108,56 @@ void VU1Interpreter::reportReservedInstruction(bool upper, uint32_t instruction)
+     m_stopRequested = true;
+ }
+ 
++// PS2X_VU1DUMP=<seconds>,<pc hex>[,<count>]: from that many seconds after the first VU1 program, the next <count>
++// (default 1) VU1 runs that start (MSCAL) or continue (MSCNT) at that address are saved as they start
++// (vu1dump_N_code.bin, _data.bin, _regs.txt) to replay or read one draw's input
++static void dumpVu1IfAsked(const VU1State &state, uint32_t pc, uint32_t top, uint32_t itop, const uint8_t *vuCode,
++                           uint32_t codeSize, const uint8_t *vuData, uint32_t dataSize)
++{
++    static const auto dump = []
++    {
++        struct D { double at = -1.0; uint32_t pc = 0, count = 1; } d;
++        if (const char *v = std::getenv("PS2X_VU1DUMP"))
++            std::sscanf(v, "%lf,%x,%u", &d.at, &d.pc, &d.count);
++        return d;
++    }();
++    static const auto start = std::chrono::steady_clock::now();
++    static uint32_t dumped = 0;
++    if (dump.at < 0.0 || dumped >= dump.count || pc != dump.pc ||
++        std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < dump.at)
++        return;
++    const std::string base = "vu1dump_" + std::to_string(dumped++);
++    if (FILE *f = std::fopen((base + "_code.bin").c_str(), "wb"))
++    {
++        std::fwrite(vuCode, 1, codeSize, f);
++        std::fclose(f);
++    }
++    if (FILE *f = std::fopen((base + "_data.bin").c_str(), "wb"))
++    {
++        std::fwrite(vuData, 1, dataSize, f);
++        std::fclose(f);
++    }
++    if (FILE *f = std::fopen((base + "_regs.txt").c_str(), "w"))
++    {
++        std::fprintf(f, "pc %x program %x top %x itop %x q %.9g p %.9g i %.9g r %x clip %x mac %x status %x%c", pc,
++                     g_vu1LastStartPc, top, itop, state.q, state.p, state.i, state.r, state.clip, state.mac, state.status, 10);
++        std::fprintf(f, "acc %.9g %.9g %.9g %.9g%c", state.acc[0], state.acc[1], state.acc[2], state.acc[3], 10);
++        for (int r = 0; r < 32; ++r)
++            std::fprintf(f, "vf%d %.9g %.9g %.9g %.9g%c", r, state.vf[r][0], state.vf[r][1], state.vf[r][2], state.vf[r][3], 10);
++        for (int r = 0; r < 16; ++r)
++            std::fprintf(f, "vi%d %d%c", r, state.vi[r], 10);
++        std::fclose(f);
++    }
++}
++
+ void VU1Interpreter::execute(uint8_t *vuCode, uint32_t codeSize,
+                              uint8_t *vuData, uint32_t dataSize,
+                              GS &gs, PS2Memory *memory,
+                              uint32_t startPC, uint32_t top, uint32_t itop,
+                              uint32_t maxCycles)
+ {
++    if (m_unit == Unit::VU1)
++        g_vu1LastStartPc = startPC; // for PS2X_DRAWLOG: which microprogram drew a primitive
+     resetScheduler();
+     m_state.pc = startPC & microAddressMask();
+     m_state.ebit = false;
+@@ -2033,6 +2173,8 @@ void VU1Interpreter::execute(uint8_t *vuCode, uint32_t codeSize,
+     m_state.vf[0][1] = 0.0f;
+     m_state.vf[0][2] = 0.0f;
+     m_state.vf[0][3] = 1.0f;
++    if (m_unit == Unit::VU1)
++        dumpVu1IfAsked(m_state, startPC & microAddressMask(), top, itop, vuCode, codeSize, vuData, dataSize);
+     run(vuCode, codeSize, vuData, dataSize, gs, memory, maxCycles);
+ }
+ 
+@@ -2045,6 +2187,8 @@ void VU1Interpreter::resume(uint8_t *vuCode, uint32_t codeSize,
+     m_state.itop = itop;
+     m_state.stoppedByD = false;
+     m_state.stoppedByT = false;
++    if (m_unit == Unit::VU1)
++        dumpVu1IfAsked(m_state, m_state.pc, top, itop, vuCode, codeSize, vuData, dataSize);
+     run(vuCode, codeSize, vuData, dataSize, gs, memory, maxCycles);
+ }
+ 
+@@ -2192,8 +2336,9 @@ void VU1Interpreter::runLoop(uint8_t *vuCode, uint32_t codeSize,
+ 
+         // Enter the compiled code at a compiled pair when no branch / E-bit / halt is pending; it runs until it
+         // leaves its code, runs out of budget or ends the program, leaving the state as this loop would.
++        // (pieceFlagsUsable keeps the entries empty where compiled code would miss MAC / status flags the code reads)
+         if (compiledAllowed && !m_state.branchPending && !m_state.ebit && !m_state.haltAfterDelaySlot &&
+-            (m_state.pc & 7u) == 0u && ensureDecodedCodeCache(vuCode, codeSize, memory) && !m_codeReadsMacStatus)
++            (m_state.pc & 7u) == 0u && ensureDecodedCodeCache(vuCode, codeSize, memory))
+         {
+             if (const Vu1CompiledFn compiledFn = m_compiledFnAt[m_state.pc >> 3])
+             {
+@@ -2259,7 +2404,7 @@ void VU1Interpreter::runLoop(uint8_t *vuCode, uint32_t codeSize,
+ 
+         if (decoded.iBit)
+         {
+-            runUpper(decoded.upper);
++            runUpper(decoded.upper, decoded.macProducer);
+             float immediate = 0.0f;
+             std::memcpy(&immediate, &decoded.lower, sizeof(immediate));
+             m_state.i = normalizeOperand(immediate);
+@@ -2271,7 +2416,7 @@ void VU1Interpreter::runLoop(uint8_t *vuCode, uint32_t codeSize,
+             std::memcpy(oldVf,
+                         m_state.vf[decoded.upperVfShadowReg],
+                         sizeof(oldVf));
+-            runUpper(decoded.upper);
++            runUpper(decoded.upper, decoded.macProducer);
+             std::memcpy(upperVf,
+                         m_state.vf[decoded.upperVfShadowReg],
+                         sizeof(upperVf));
+@@ -2285,7 +2430,7 @@ void VU1Interpreter::runLoop(uint8_t *vuCode, uint32_t codeSize,
+         }
+         else
+         {
+-            runUpper(decoded.upper);
++            runUpper(decoded.upper, decoded.macProducer);
+             execLower(decoded.lower, vuData, dataSize, gs, memory, decoded.upper);
+         }
+ 
+@@ -2475,7 +2620,7 @@ void VU1Interpreter::refreshCompiledEntries(const uint8_t *vuCode, uint32_t code
+         const uint32_t bytes = piece.pairCount * 8u;
+         if (entry.state < 0 || piece.vuAddress % 8u != 0u || piece.vuAddress + bytes > codeSize ||
+             piece.vuAddress / 8u + piece.pairCount > kMaxDecodedPairs ||
+-            std::memcmp(vuCode + piece.vuAddress, piece.code, bytes) != 0)
++            std::memcmp(vuCode + piece.vuAddress, piece.code, bytes) != 0 || !pieceFlagsUsable(piece, vuCode, codeSize))
+             continue;
+         if (entry.state == 0)
+         {
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp
+index 6fe0609..d17f1e2 100644
+--- a/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu1_upper.cpp
+@@ -411,6 +411,10 @@ void VU1Interpreter::execUpper(uint32_t instr)
+                 flags |= 0x10u;
+             if (exceedsClipPlane(m_state.vf[fs][2], 0x80000000u))
+                 flags |= 0x20u;
++            // PS2X_VU1_NOCLIP (diagnosis only): every vertex inside the frustum, to tell VU1 culling from missing input.
++            static const bool s_noClip = std::getenv("PS2X_VU1_NOCLIP") != nullptr;
++            if (s_noClip)
++                flags = 0u;
+             queueClip(flags);
+             return;
+         }
+@@ -553,6 +557,35 @@ namespace
+ bool VU1Interpreter::execUpperFast(uint32_t instr)
+ {
+     const uint8_t op = instr & 0x3Fu;
++    // OPMULA (special 0x2E): ACC.xyz = vs.yzx * vt.zxy; OPMSUB (0x2E): vd.xyz = ACC.xyz - vs.yzx * vt.zxy (as execUpper;
++    // w gets 0). The cross product of the games' back-face tests, in every vertex loop.
++    if (op == 0x2Eu || (op >= 0x3Cu && ((instr & 3u) | ((instr >> 4) & 0x7Cu)) == 0x2Eu))
++    {
++        const bool toAcc = op != 0x2Eu;
++        const uint8_t dest = DEST(instr);
++        const float *vs = m_state.vf[FS(instr)];
++        const float *vt = m_state.vf[FT(instr)];
++        static constexpr uint8_t from_s[3] = {1u, 2u, 0u}, from_t[3] = {2u, 0u, 1u};
++        float result[4] = {0.0f, 0.0f, 0.0f, 0.0f};
++        for (uint32_t c = 0; c < 3u; ++c)
++        {
++            const float a = fastOperand(vs[from_s[c]]);
++            const float b = fastOperand(vt[from_t[c]]);
++            if (toAcc)
++                result[c] = fastPlainResult(a * b);
++            else
++            {
++                const float acc = fastOperand(m_state.acc[c]);
++                result[c] = fastExactResult(acc - a * b, static_cast<double>(acc) - static_cast<double>(a) * static_cast<double>(b));
++            }
++        }
++        m_currentUpperInstruction = instr;
++        float *target = toAcc ? m_state.acc : m_state.vf[FD(instr)];
++        for (uint32_t c = 0; c < 4u; ++c)
++            if (dest & (0x8u >> c))
++                target[c] = result[c];
++        return true;
++    }
+     const uint8_t dest = DEST(instr);
+     const uint8_t fs = FS(instr);
+     const uint8_t ft = FT(instr);
+@@ -722,3 +755,24 @@ bool VU1Interpreter::execUpperFast(uint32_t instr)
+             target[c] = result[c];
+     return true;
+ }
++
++// An FMAC instruction whose MAC flags the code can read (macProducer): the fast-mode result, and the MAC flags it
++// queues taken from that result (zero / sign per lane, as normalizeResult reads them).
++// shortcut: a result the fast rules flushed or clamped sets Z (not Z + U) or nothing (not O), and the sticky status bits
++// are not exact; fast mode is only used while the code reads no status flags, and the games' readers test sign / zero.
++bool VU1Interpreter::execUpperFastMac(uint32_t instr)
++{
++    if (!execUpperFast(instr))
++        return false;
++    const uint8_t dest = DEST(instr);
++    const float *result = (instr & 0x3Fu) >= 0x3Cu ? m_state.acc : m_state.vf[FD(instr)];
++    uint8_t laneFlags[4]{};
++    for (uint32_t c = 0; c < 4u; ++c)
++    {
++        uint32_t bits = 0u;
++        std::memcpy(&bits, &result[c], sizeof(bits));
++        laneFlags[c] = static_cast<uint8_t>(((bits & 0x7FFFFFFFu) == 0u ? 0x1u : 0u) | ((bits >> 31) != 0u ? 0x2u : 0u));
++    }
++    updateFmacFlags(laneFlags, dest, 0u);
++    return true;
++}

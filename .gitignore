@@ -1,0 +1,44 @@
+# Nada do jogo entra no git: ISO, ELF, módulos, o C++ gerado a partir dele e prints da tela.
+# tools/check_publish.py confere o que vai ser publicado (o pre-commit o roda: git config core.hooksPath tools/githooks).
+
+# o disco e o que sai dele
+game/
+disc/
+*.iso
+*.chd
+*.cso
+*.bin
+*.img
+*.elf
+*.ELF
+*.irx
+*.IRX
+*.wad
+*.WAD
+*.pss
+*.PSS
+SLUS_*
+mc0/
+mc1/
+
+# gerado a partir do executável do jogo (código do jogo) e análises com o executável dentro
+generated/
+ghidra/
+config/ben10.toml
+config/ben10_functions.csv
+config/output/
+
+# compilação, execução e dependências (recriadas pelos patches, ver patches/README.md)
+build/
+third_party/
+refs/
+__pycache__/
+*.log
+*.pcm
+*.wav
+*.bak
+
+# imagens da tela do jogo (arte do jogo): ficam só no seu PC
+docs/*.png
+*.png
+*.jpg

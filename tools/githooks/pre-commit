@@ -1,0 +1,4 @@
+#!/bin/sh
+# Blocks a commit that would publish game files (tools/check_publish.py). Enable once per clone:
+#   git config core.hooksPath tools/githooks
+exec python -I tools/check_publish.py

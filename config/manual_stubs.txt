@@ -1,0 +1,28 @@
+# Stub decisions made by hand for SLUS_216.61 (read by tools/make_config.py).
+#   name@0xADDR   bind this address to the runtime's handler (wins over Ghidra/analyzer)
+#   -name@0xADDR  never bind it: the game's own recompiled code runs there, also where the name is one the recompiler
+#                 binds to a runtime handler by name (written into ben10.toml's stubs as "-name@0xADDR")
+# Reviewed 2026-11-25 against the game's decompilation (build/review/decomp.txt) and the runtime handlers.
+
+# libcdvd: sceCdLayerSearchFile(fp, name, layer) is the runtime's sceCdSearchFile(fp, name) on this single-layer disc.
+# The Def Jam runtime has no handler named sceCdLayerSearchFile, so the analyzer's binding was dropped and the game's
+# own code spun binding cdvdfsv's RPC 0x80000597, which no IOP module provides (Def Jam bound sceCdSearchFile too).
+sceCdSearchFile@0x001C3620
+
+# libm: the game's versions are newlib/fdlibm DOUBLE routines compiled soft-float (value in a0, result in v0).
+# The runtime's handlers are single-float (f12 in, f0 out), so every call would return garbage. Same as Def Jam.
+-sqrt@0x001F3640
+-fabs@0x001F8B60
+-ceil@0x001F2BB8
+-floor@0x001F2D78
+-log@0x001F34F8
+-tan@0x001F2F58
+# float ABI matches, but the handler is an approximation (always y[1]=0), which breaks __kernel_tanf.
+-__ieee754_rem_pio2f@0x001F6A70
+# newlib LCG (31-bit, state in the game's reent struct, seeded by the game's srand at 0x1FBBE8, which stays unbound).
+-rand@0x001FBBF8
+
+# libgraph stays bound to the runtime's handlers (sceGsResetGraph, sceGsSetDef*, sceGsPut*Env, sceGsSwapDBuff, ...):
+# an earlier unbinding list here never took effect (the recompiler bound these names anyway) and the game has run
+# correctly that way through boot, menus and the first level. If the movies (phase 5) need the game's own display
+# setup (Def Jam lost FIELD mode with a split g_gparam), unbind the whole library together, not part of it.

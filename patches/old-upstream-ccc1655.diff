@@ -1,0 +1,392 @@
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index 0baa4ca..8082c3d 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -19,6 +19,8 @@
+ #include "iop_emulator_const.h"
+ 
+ #include <algorithm>
++#include <cstdio>
++#include <cstdlib>
+ #include <functional>
+ #include <cctype>
+ #include <map>
+@@ -634,6 +636,16 @@ namespace ps2x::iop::detail
+                         continue;
+                     }
+                     const uint64_t before = totalCycles;
++                    // PS2X_IOP_SAMPLE: which IOP thread is running, every 2^22 cycles (finds a thread that never sleeps).
++                    static const bool s_sampleThreads = std::getenv("PS2X_IOP_SAMPLE") != nullptr;
++                    static uint64_t s_lastSampleCycle = 0u;
++                    if (s_sampleThreads && totalCycles - s_lastSampleCycle >= (1ull << 22))
++                    {
++                        s_lastSampleCycle = totalCycles;
++                        std::fprintf(stderr, "[iop-sample] cycle=%llu thread=%d entry=0x%x pc=0x%x prio=%u\n",
++                                     static_cast<unsigned long long>(totalCycles), next->id, next->entry, next->cpu.pc,
++                                     next->priority);
++                    }
+                     runCpu(next->cpu, static_cast<uint32_t>(std::min<uint64_t>(kDefaultSlice, target - totalCycles)));
+                     kernel.endTimeslice(*next, kThreadReturnSentinel);
+                     if (totalCycles == before)
+diff --git a/ps2xRuntime/cmake/ReleaseMode.cmake b/ps2xRuntime/cmake/ReleaseMode.cmake
+index ba22f9b..65111fc 100644
+--- a/ps2xRuntime/cmake/ReleaseMode.cmake
++++ b/ps2xRuntime/cmake/ReleaseMode.cmake
+@@ -12,7 +12,7 @@ function(EnableFastReleaseMode TargetName)
+                 /O2 # speed
+                 /Ob2 # inline aggressively
+                 /Oi # intrinsics
+-                /GL # whole program opt
++                $<$<BOOL:${PS2X_ENABLE_LTO}>:/GL> # whole program opt (only with LTO: /GL forces an LTCG link)
+                 /Gy # function-level linking
+                 /Gw # global data in COMDAT
+                 /GF # string pooling
+@@ -28,7 +28,7 @@ function(EnableFastReleaseMode TargetName)
+         if(TARGET ${TargetName})
+             target_link_options(${TargetName} PRIVATE
+                 $<$<CONFIG:Release>:
+-                    /LTCG # link-time code generation
++                    $<$<BOOL:${PS2X_ENABLE_LTO}>:/LTCG> # link-time code generation
+                     /OPT:REF # remove unreferenced
+                     /OPT:ICF # fold identical COMDATs
+                 >
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/FileIO.cpp b/ps2xRuntime/src/lib/Kernel/Stubs/FileIO.cpp
+index b1083af..1f67148 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/FileIO.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/FileIO.cpp
+@@ -135,6 +135,20 @@ namespace ps2_stubs
+ 
+     void write(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+     {
++        // fd 1/2 are libc's tty (stdout/stderr): the game's printf output. The VFS has no such fds, so it was lost.
++        const uint32_t fd = getRegU32(ctx, 4);
++        if (fd == 1u || fd == 2u)
++        {
++            const uint32_t size = getRegU32(ctx, 6);
++            const uint8_t *buf = getConstMemPtr(rdram, getRegU32(ctx, 5));
++            if (buf && size < 0x10000u)
++            {
++                std::cout.write(reinterpret_cast<const char *>(buf), size);
++                std::cout.flush();
++            }
++            setReturnS32(ctx, static_cast<int32_t>(size));
++            return;
++        }
+         ps2_syscalls::fioWrite(rdram, ctx, runtime);
+     }
+ 
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+index 6eaafc7..8f39a00 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+@@ -322,6 +322,83 @@ namespace
+         }
+     }
+ 
++    bool readHostRange(const std::filesystem::path &path, uint64_t offsetBytes, uint8_t *dst, size_t byteCount);
++
++    // Looks a path up in the ISO9660 directory of the configured disc image (PS2X_CD_IMAGE): the file's real first
++    // sector and size, the same sectors the IOP's cdvdman reads from that image.
++    bool findCdImageFile(const std::string &ps2Path, uint32_t &lbnOut, uint32_t &sizeOut)
++    {
++        const std::filesystem::path image = getCdImagePath();
++        if (image.empty())
++        {
++            return false;
++        }
++        std::array<uint8_t, kCdSectorSize> pvd{};
++        if (!readHostRange(image, 16ull * kCdSectorSize, pvd.data(), pvd.size()) || std::memcmp(pvd.data() + 1, "CD001", 5) != 0)
++        {
++            return false;
++        }
++        uint32_t dirLbn = 0u, dirSize = 0u;
++        std::memcpy(&dirLbn, pvd.data() + 156 + 2, 4);
++        std::memcpy(&dirSize, pvd.data() + 156 + 10, 4);
++
++        std::string path = normalizeCdPathNoPrefix(ps2Path);
++        std::vector<std::string> parts;
++        for (size_t start = 0u; start <= path.size();)
++        {
++            const size_t end = std::min(path.find_first_of("/\\", start), path.size());
++            std::string part = toLowerAscii(path.substr(start, end - start));
++            part = part.substr(0, part.find(';'));
++            if (!part.empty())
++                parts.push_back(part);
++            start = end + 1u;
++        }
++        if (parts.empty() || dirSize > (1u << 20))
++        {
++            return false;
++        }
++        for (size_t i = 0u; i < parts.size(); ++i)
++        {
++            std::vector<uint8_t> dir(dirSize);
++            if (!readHostRange(image, static_cast<uint64_t>(dirLbn) * kCdSectorSize, dir.data(), dir.size()))
++            {
++                return false;
++            }
++            bool found = false;
++            for (size_t pos = 0u; pos < dir.size();)
++            {
++                const uint8_t length = dir[pos];
++                if (length == 0u) // records never cross a sector: skip to the next one
++                {
++                    pos = (pos / kCdSectorSize + 1u) * kCdSectorSize;
++                    continue;
++                }
++                if (pos + length > dir.size() || length < 34u)
++                {
++                    break;
++                }
++                const uint8_t nameLength = dir[pos + 32];
++                std::string name = toLowerAscii(std::string(reinterpret_cast<const char *>(&dir[pos + 33]), nameLength));
++                name = name.substr(0, name.find(';'));
++                if (name == parts[i] && ((dir[pos + 25] & 2u) != 0u) == (i + 1u < parts.size()))
++                {
++                    std::memcpy(&dirLbn, &dir[pos + 2], 4);
++                    std::memcpy(&dirSize, &dir[pos + 10], 4);
++                    found = true;
++                    break;
++                }
++                pos += length;
++            }
++            if (!found)
++            {
++                return false;
++            }
++        }
++        lbnOut = dirLbn;
++        sizeOut = dirSize;
++        return true;
++    }
++
+     bool registerCdFile(const std::string &ps2Path, CdFileEntry &entryOut)
+     {
+         const std::string key = cdPathKey(ps2Path);
+@@ -339,6 +416,21 @@ namespace
+             return true;
+         }
+ 
++        // With a disc image, the real sectors: the game passes them to IOP modules (e.g. a CD arbiter) that read the
++        // image through cdvdman, so a pseudo LBN from the loose files would point them at nothing. Not added to
++        // g_cdFilesByKey, so sceCdRead finds no loose entry and reads these sectors from the image.
++        uint32_t imageLbn = 0u;
++        uint32_t imageSize = 0u;
++        if (findCdImageFile(ps2Path, imageLbn, imageSize))
++        {
++            entryOut.hostPath = getCdImagePath();
++            entryOut.sizeBytes = imageSize;
++            entryOut.baseLbn = imageLbn;
++            entryOut.sectors = sectorsForBytes(imageSize);
++            g_lastCdError = 0;
++            return true;
++        }
++
+         const std::filesystem::path root = getCdRootPath();
+         std::filesystem::path path = cdHostPath(ps2Path);
+         std::error_code ec;
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Dispatcher.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/Dispatcher.cpp
+index 121fcc7..c8c01de 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Dispatcher.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Dispatcher.cpp
+@@ -314,6 +314,15 @@ namespace ps2_syscalls
+         case 0x7F:
+             GetMemorySize(rdram, ctx, runtime);
+             return true;
++        case 0x80: // GetGsDxDyOffset(mode, &dx, &dy, &dw, &dh): libgraph's display offsets for newer consoles.
++            // The host has no model-specific CRTC offsets: zero, the same values libgraph uses on early models.
++            for (int reg = 5; reg <= 8; ++reg)
++            {
++                if (uint8_t *out = getMemPtr(rdram, getRegU32(ctx, reg)))
++                    std::memset(out, 0, sizeof(int32_t));
++            }
++            setReturnS32(ctx, 0);
++            return true;
+         case 0x82:
+             InitTLB(rdram, ctx, runtime);
+             return true;
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+index 401e53e..cd4c6de 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+@@ -491,22 +491,10 @@ namespace ps2_syscalls
+                                        : 0u;
+         if (stack == 0xFFFFFFFFu)
+         {
+-            if (stackSizeSigned > 0)
+-            {
+-                const uint32_t requestedSize = static_cast<uint32_t>(stackSizeSigned);
+-                if (requestedSize < PS2_RAM_SIZE)
+-                {
+-                    sp = PS2_RAM_SIZE - requestedSize;
+-                }
+-                else
+-                {
+-                    sp = PS2_RAM_SIZE;
+-                }
+-            }
+-            else
+-            {
+-                sp = PS2_RAM_SIZE;
+-            }
++            // stack == -1: the stack is [RAM end - size, RAM end) and grows down from its top, as the kernel sets it.
++            // Starting at its bottom let it grow below that range, into the async callback stacks carved there
++            // (Ben 10: the vsync callback overwrote the saved $ra of the game's init; it returned to 0).
++            sp = PS2_RAM_SIZE;
+         }
+         else if (stack != 0u)
+         {
+@@ -523,7 +511,7 @@ namespace ps2_syscalls
+         sp &= ~0xFu;
+         if (stack == 0xFFFFFFFFu)
+         {
+-            initialStack = sp;
++            initialStack = stackSize != 0u && stackSize < PS2_RAM_SIZE ? PS2_RAM_SIZE - stackSize : sp;
+         }
+         else if (stack != 0u)
+         {
+diff --git a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+index 010bda4..7423346 100644
+--- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+@@ -1,3 +1,8 @@
++#if defined(_MSC_VER) && !defined(__clang__)
++#define PS2X_FORCEINLINE __forceinline
++#else
++#define PS2X_FORCEINLINE __attribute__((always_inline)) inline
++#endif
+ #include "runtime/gs/gs_cpu_backend.h"
+ #include "ThreadNaming.h"
+ #include "runtime/gs/ps2_gs_common.h"
+@@ -346,7 +351,7 @@ namespace
+         }
+     }
+ 
+-    __attribute__((always_inline)) inline bool passesAlphaTest(uint64_t testReg, uint8_t alpha)
++    PS2X_FORCEINLINE bool passesAlphaTest(uint64_t testReg, uint8_t alpha)
+     {
+         if ((testReg & 0x1u) == 0u)
+             return true;
+@@ -395,7 +400,7 @@ namespace
+     };
+ 
+     // Runs for every pixel; as a call it showed up on its own in raster profiles.
+-    __attribute__((always_inline)) inline PixelWriteMask classifyAlphaTest(uint64_t testReg, uint8_t alpha, uint8_t framePsm)
++    PS2X_FORCEINLINE PixelWriteMask classifyAlphaTest(uint64_t testReg, uint8_t alpha, uint8_t framePsm)
+     {
+         const bool pass = passesAlphaTest(testReg, alpha);
+         if (pass)
+@@ -2315,7 +2320,7 @@ namespace
+     // Calls write(frameTag, depthTag) with the target formats as compile-time constants for the
+     // combinations 3D scenes draw with, and as GSCpuBackend::kAnyTarget otherwise.
+     template <typename Write>
+-    __attribute__((always_inline)) inline void dispatchTargetFormats(uint32_t fpsm, uint32_t zpsm, Write &&write)
++    PS2X_FORCEINLINE void dispatchTargetFormats(uint32_t fpsm, uint32_t zpsm, Write &&write)
+     {
+         constexpr uint32_t kAny = 0xFFu;
+         auto withDepth = [&](auto frameTag)
+@@ -2444,7 +2449,7 @@ namespace
+ }
+ 
+ // Runs for most pixels of a tracked batch; as a call it cost about 5% of their raster time.
+-__attribute__((always_inline)) inline void GSCpuBackend::RecordUndo(const PixelPipeline &pipe, const uint8_t *pixel, int x, int y)
++PS2X_FORCEINLINE void GSCpuBackend::RecordUndo(const PixelPipeline &pipe, const uint8_t *pixel, int x, int y)
+ {
+     // Only RGB24/Z24 targets write tracked pages, so the whole word is the pixel's.
+     const uint32_t offset = static_cast<uint32_t>(pixel - m_vram);
+@@ -2459,13 +2464,13 @@ __attribute__((always_inline)) inline void GSCpuBackend::RecordUndo(const PixelP
+     pipe.undo->push_back(entry);
+ }
+ 
+-__attribute__((always_inline)) inline bool GSCpuBackend::WritePixel(const PixelPipeline &pipe, int x, int y, int z, uint8_t r, uint8_t g, uint8_t b, uint8_t a, uint8_t fog)
++PS2X_FORCEINLINE bool GSCpuBackend::WritePixel(const PixelPipeline &pipe, int x, int y, int z, uint8_t r, uint8_t g, uint8_t b, uint8_t a, uint8_t fog)
+ {
+     return WritePixelFor<kAnyTarget, kAnyTarget>(pipe, x, y, z, r, g, b, a, fog);
+ }
+ 
+ template <uint32_t FramePsm, uint32_t DepthPsm>
+-__attribute__((always_inline)) inline bool GSCpuBackend::WritePixelFor(const PixelPipeline &pipe, int x, int y, int z, uint8_t r, uint8_t g, uint8_t b, uint8_t a, uint8_t fog)
++PS2X_FORCEINLINE bool GSCpuBackend::WritePixelFor(const PixelPipeline &pipe, int x, int y, int z, uint8_t r, uint8_t g, uint8_t b, uint8_t a, uint8_t fog)
+ {
+     // With the formats fixed, the format switches below fold away and addressing inlines.
+     constexpr bool knownFrame = FramePsm != kAnyTarget;
+@@ -3096,12 +3101,12 @@ GSCpuBackend::TextureAxis GSCpuBackend::PrepareTextureAxis(float coordinate, int
+     return axis;
+ }
+ 
+-__attribute__((always_inline)) inline uint32_t GSCpuBackend::SampleTexel(const TextureSampler &sampler, int u, int v)
++PS2X_FORCEINLINE uint32_t GSCpuBackend::SampleTexel(const TextureSampler &sampler, int u, int v)
+ {
+     return ConvertTexel(sampler, sampler.fetch(*sampler.cache, m_vram, sampler.tbp0, sampler.tbw, static_cast<u32>(u), static_cast<u32>(v)));
+ }
+ 
+-__attribute__((always_inline)) inline uint32_t GSCpuBackend::ConvertTexel(const TextureSampler &sampler, uint32_t out)
++PS2X_FORCEINLINE uint32_t GSCpuBackend::ConvertTexel(const TextureSampler &sampler, uint32_t out)
+ {
+     if (sampler.clut)
+         return sampler.clut[static_cast<u8>(out)];
+diff --git a/ps2xRuntime/src/lib/gs/ps2_gs_memory.cpp b/ps2xRuntime/src/lib/gs/ps2_gs_memory.cpp
+index ec69e25..d4af46d 100644
+--- a/ps2xRuntime/src/lib/gs/ps2_gs_memory.cpp
++++ b/ps2xRuntime/src/lib/gs/ps2_gs_memory.cpp
+@@ -1,3 +1,8 @@
++#if defined(_MSC_VER) && !defined(__clang__)
++#define PS2X_FLATTEN // MSVC has no flatten attribute
++#else
++#define PS2X_FLATTEN __attribute__((flatten))
++#endif
+ #include <array>
+ 
+ #include "runtime/gs/ps2_gs_memory.h"
+@@ -258,7 +263,7 @@ namespace GSMem
+     namespace
+     {
+         template <PixelStorageMode psm, const auto& table>
+-        __attribute__((flatten)) u32 FetchTexel(TexturePageCache& cache, const u8* data, u32 bp, u32 bw, u32 x, u32 y)
++        PS2X_FLATTEN u32 FetchTexel(TexturePageCache& cache, const u8* data, u32 bp, u32 bw, u32 x, u32 y)
+         {
+             return PixelStorageTraits<psm>::Read(table, data, bp, bw, x, y, &cache);
+         }
+@@ -279,7 +284,7 @@ namespace GSMem
+         }
+ 
+         template <PixelStorageMode psm, const auto& table>
+-        __attribute__((flatten)) void FetchQuad(TexturePageCache& cache, const u8* data, u32 bp, u32 bw, u32 u0, u32 u1, u32 v0, u32 v1, u32* out)
++        PS2X_FLATTEN void FetchQuad(TexturePageCache& cache, const u8* data, u32 bp, u32 bw, u32 u0, u32 u1, u32 v0, u32 v1, u32* out)
+         {
+             using Traits = PixelStorageTraits<psm>;
+             constexpr Extent2D extent = Traits::PageExtent();
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index e60e0ba..042d845 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -429,6 +429,16 @@ static void UploadFrame(Texture2D &tex, PS2Runtime *rt, uint32_t &outWidth, uint
+                              static_cast<double>(pushed - s_lastPushed) / elapsed,
+                              static_cast<unsigned long long>(underruns - s_lastUnderruns),
+                              static_cast<unsigned long long>(audioDrops - s_lastAudioDrops));
++                // IOP load: instructions close to cycles mean an IOP thread never sleeps (busy IOP).
++                const ps2x::iop::DebugSnapshot iop = rt->iopDebugSnapshot();
++                static uint64_t s_lastIopCycles = iop.emulatorCycles;
++                static uint64_t s_lastIopInstructions = iop.emulatorInstructions;
++                std::fprintf(stderr, "[perf] iop_cycles_per_s=%.0f iop_instr_per_s=%.0f iop_threads=%u\n",
++                             static_cast<double>(iop.emulatorCycles - s_lastIopCycles) / elapsed,
++                             static_cast<double>(iop.emulatorInstructions - s_lastIopInstructions) / elapsed,
++                             iop.emulatorThreads);
++                s_lastIopCycles = iop.emulatorCycles;
++                s_lastIopInstructions = iop.emulatorInstructions;
+                 s_lastReport = now;
+                 s_lastTick = currentTick;
+                 s_hostFrames = 0u;
+@@ -1148,6 +1158,12 @@ void PS2Runtime::configureIoPathsFromElf(const std::string &elfPath)
+         paths.cdRoot = paths.elfDirectory;
+         paths.mcRoot = paths.elfDirectory / "mc0";
+     }
++    // The disc image (an ISO of the game's own disc) for sector reads: EE sceCdRead and the IOP's cdvdman then
++    // agree on real sector numbers. A game override can still set it instead.
++    if (const char *image = std::getenv("PS2X_CD_IMAGE"); image != nullptr && image[0] != '\0')
++    {
++        paths.cdImage = normalizeAbsolutePath(std::filesystem::path(image));
++    }
+ 
+     setIoPaths(paths);
+ }
