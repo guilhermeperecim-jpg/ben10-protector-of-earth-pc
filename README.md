@@ -98,7 +98,7 @@ speaks English and Portuguese (Options › Launcher › Language).
 | 7. Launcher e pacote público | concluída |
 | 8. Linux | a fazer |
 
-Detalhes e comandos em [`docs/CHECKLIST.md`](docs/CHECKLIST.md); plano em [`PLANO.md`](PLANO.md).
+Detalhes e comandos em [`docs/CHECKLIST.md`](docs/CHECKLIST.md).
 
 ## Para desenvolvedores
 

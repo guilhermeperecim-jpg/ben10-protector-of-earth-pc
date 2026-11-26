@@ -52,3 +52,6 @@ launcher/obj/
 
 # o pacote para os jogadores (tools/make_release.py)
 dist/
+
+# o plano inicial do port: só no PC
+PLANO.md
