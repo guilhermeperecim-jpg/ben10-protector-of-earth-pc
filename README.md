@@ -220,10 +220,7 @@ python -I tools/check_publish.py --all
 
 GPL-3.0 ([`LICENSE`](LICENSE)); cada parte de terceiros e a sua licença: [`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt).
 
-### Agradecimentos
 
-- À família e aos amigos que testaram a instalação em PCs diferentes e acharam os erros que só aparecem fora do PC de
-  quem fez.
 
 Este projeto não tem vínculo com a Cartoon Network, a D3Publisher ou a High Voltage Software. Ben 10 é marca da Cartoon
 Network. Nenhum código, arquivo ou arte do jogo é distribuído aqui. O ícone e as telas do launcher são arte original do
