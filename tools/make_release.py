@@ -4,6 +4,7 @@
 #   Ben 10 Recomp\
 #     Ben 10 Recomp Launcher.exe   the launcher with its first-run setup (.NET built in)
 #     LEIA-ME - READ ME.txt
+#     recomplauncher.json     how RecompLauncher sets the game up and starts it (next to the program, as it asks)
 #     files\                  everything else, so the top stays simple (the setup puts disc\, game\, the game … here):
 #       python\               a portable Python (Python's own "embeddable" package; not installed on Windows)
 #       source\               the build kit: this repository's files (as git would commit them), PS2Recomp at its
@@ -242,6 +243,7 @@ def main():
         pgs_patched = patched_parallel_gs(work)
         with ReleaseZip(out + '.part', 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
             z.write(exe, TOP + '/' + LAUNCHER)
+            z.write(os.path.join(REPO, 'recomplauncher.json'), TOP + '/recomplauncher.json')
             z.writestr(TOP + '/LEIA-ME - READ ME.txt', README.replace('\n', '\r\n'))
             with zipfile.ZipFile(pyzip) as py:
                 for n in py.namelist():

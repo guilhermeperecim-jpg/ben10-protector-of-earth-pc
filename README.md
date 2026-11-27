@@ -6,6 +6,8 @@
   <a href="https://github.com/guilhermeperecim-jpg/ben10-protector-of-earth-pc/releases/latest/download/Ben10-Recomp-Windows.zip"><img src="https://img.shields.io/badge/Baixar-Windows_10%2F11-6fd43c?style=for-the-badge&logo=windows&logoColor=white&labelColor=1f2a1f" alt="Baixar para Windows"></a>
 </p>
 
+<p align="center"><a href="https://recomplauncher.com"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a></p>
+
 <p align="center">
   <img src="https://img.shields.io/badge/PS2-SLUS--21661_v1.01-3c7d24?logo=playstation&logoColor=white" alt="PS2 SLUS-21661 v1.01">
   <img src="https://img.shields.io/badge/GPU-Vulkan-3c7d24?logo=vulkan&logoColor=white" alt="Vulkan">

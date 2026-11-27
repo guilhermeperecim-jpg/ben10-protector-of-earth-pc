@@ -1,0 +1,168 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Ben 10: Protector of Earth",
+  "repo": "guilhermeperecim-jpg/ben10-protector-of-earth-pc",
+  "inputs": [
+    {
+      "id": "game",
+      "label": "Your disc image (.iso) of the USA PlayStation 2 release, version 1.01, serial SLUS-21661.",
+      "formats": [{ "type": "file", "extensions": ["iso"] }],
+      "check": { "iso9660": "SLUS_216.61" },
+      "dumps": [{ "name": "USA (v1.01)", "size": 3400499200, "crc32": "872c6408" }]
+    }
+  ],
+  "start": {
+    "program": ["Ben 10 Recomp Launcher.exe"],
+    "args": ["--play"]
+  },
+  "prepare": {
+    "program": ["Ben 10 Recomp Launcher.exe"],
+    "args": ["--prepare", "--disc={input:game}"],
+    "label": "Building the game from your disc (30 to 60 minutes, once)",
+    "done": ["{install}/files/Ben 10 Recomp.exe"],
+    "keeps_copy": true,
+    "options": [
+      {
+        "id": "vs_build_tools",
+        "label": "Microsoft's C++ tools",
+        "note": "Needed to build the game on your PC: about 570 MB from Microsoft, into the game's folder, nothing installed in Windows.",
+        "os": ["windows"],
+        "required": true,
+        "args": ["--accept-vs-license"],
+        "license": { "name": "Microsoft Visual Studio license terms", "url": "https://visualstudio.microsoft.com/license-terms/" }
+      }
+    ]
+  },
+  "config": [
+    {
+      "id": "main",
+      "format": "toml",
+      "file": [{ "path": "{install}/files/settings.toml" }]
+    }
+  ],
+  "groups": [{ "id": "Advanced", "advanced": true }],
+  "settings": [
+    {
+      "id": "window", "label": "Window", "group": "Display",
+      "help": "Borderless fills the screen; a window can be moved and resized.",
+      "choices": [
+        { "label": "Borderless", "set": { "display/mode": "\"borderless\"" } },
+        { "label": "Window", "set": { "display/mode": "\"window\"" } }
+      ],
+      "defaults": { "display/mode": "\"borderless\"" }
+    },
+    {
+      "id": "shape", "label": "Picture shape", "group": "Display",
+      "help": "Widescreen shows more of each level; menus and movies stay 4:3, as they were made.",
+      "choices": [
+        { "label": "Widescreen 16:9", "set": { "display/shape": "\"widescreen\"" } },
+        { "label": "4:3, as on the PS2", "set": { "display/shape": "\"4:3\"" } },
+        { "label": "Stretch", "set": { "display/shape": "\"stretch\"" } }
+      ],
+      "defaults": { "display/shape": "\"widescreen\"" }
+    },
+    {
+      "id": "vsync", "label": "VSync", "group": "Display",
+      "help": "Waits for the screen before each picture, so there's no tearing.",
+      "choices": [
+        { "label": "On", "set": { "display/vsync": "true" } },
+        { "label": "Off", "set": { "display/vsync": "false" } }
+      ],
+      "defaults": { "display/vsync": "true" }
+    },
+    {
+      "id": "scale", "label": "Sharpness", "group": "Graphics",
+      "help": "How much sharper than the PS2 the graphics card draws. 16x needs a strong card.",
+      "when": { "graphics/renderer": "\"gpu\"" },
+      "choices": [
+        { "label": "1x (the PS2's own)", "set": { "graphics/scale": "1" } },
+        { "label": "2x", "set": { "graphics/scale": "2" } },
+        { "label": "4x", "set": { "graphics/scale": "4" } },
+        { "label": "8x", "set": { "graphics/scale": "8" } },
+        { "label": "16x", "set": { "graphics/scale": "16" } }
+      ],
+      "defaults": { "graphics/scale": "8", "graphics/renderer": "\"gpu\"" }
+    },
+    {
+      "id": "filter", "label": "Scaling to the window", "group": "Graphics",
+      "help": "How the picture is fitted to your window or screen.",
+      "when": { "graphics/renderer": "\"gpu\"" },
+      "choices": [
+        { "label": "FSR (sharp)", "set": { "graphics/filter": "\"fsr\"" } },
+        { "label": "Smooth", "set": { "graphics/filter": "\"smooth\"" } },
+        { "label": "Blocky (pixels)", "set": { "graphics/filter": "\"blocky\"" } }
+      ],
+      "defaults": { "graphics/filter": "\"fsr\"", "graphics/renderer": "\"gpu\"" }
+    },
+    {
+      "id": "sharpening", "label": "FSR sharpening", "group": "Graphics",
+      "help": "How much FSR sharpens the picture.",
+      "when": { "graphics/filter": "\"fsr\"" },
+      "slider": { "key": "graphics/sharpening", "min": 0, "max": 100, "step": 5, "format": "%.0f" },
+      "defaults": { "graphics/sharpening": "75", "graphics/filter": "\"fsr\"" }
+    },
+    {
+      "id": "sharp2d", "label": "Sharp HUD and text", "group": "Graphics",
+      "help": "The HUD, text and menus as sharp as the 3-D, or as on the PS2.",
+      "when": { "graphics/renderer": "\"gpu\"" },
+      "choices": [
+        { "label": "On", "set": { "graphics/sharp_2d": "true" } },
+        { "label": "As on the PS2", "set": { "graphics/sharp_2d": "false" } }
+      ],
+      "defaults": { "graphics/sharp_2d": "true", "graphics/renderer": "\"gpu\"" }
+    },
+    {
+      "id": "renderer", "label": "Drawn by", "group": "Advanced",
+      "help": "The graphics card is faster and sharper; the processor draws at the PS2's own resolution.",
+      "choices": [
+        { "label": "Graphics card", "set": { "graphics/renderer": "\"gpu\"" } },
+        { "label": "Processor", "set": { "graphics/renderer": "\"cpu\"" } }
+      ],
+      "defaults": { "graphics/renderer": "\"gpu\"" }
+    },
+    {
+      "id": "volume", "label": "Volume", "group": "Sound",
+      "slider": { "key": "sound/volume", "min": 0, "max": 100, "step": 5, "format": "%.0f" },
+      "defaults": { "sound/volume": "100" }
+    },
+    {
+      "id": "reverb", "label": "Echo", "group": "Sound",
+      "help": "The reverb the PS2's sound chip adds.",
+      "choices": [
+        { "label": "On", "set": { "sound/reverb": "true" } },
+        { "label": "Off", "set": { "sound/reverb": "false" } }
+      ],
+      "defaults": { "sound/reverb": "true" }
+    },
+    {
+      "id": "vibration", "label": "Controller vibration", "group": "Controls",
+      "choices": [
+        { "label": "On", "set": { "controls/vibration_1": "true" } },
+        { "label": "Off", "set": { "controls/vibration_1": "false" } }
+      ],
+      "defaults": { "controls/vibration_1": "true" }
+    },
+    {
+      "id": "keyboard", "label": "Keyboard", "group": "Controls",
+      "help": "The keyboard plays as player 1, or not at all.",
+      "choices": [
+        { "label": "Plays as player 1", "set": { "controls/keyboard": "1" } },
+        { "label": "Off", "set": { "controls/keyboard": "0" } }
+      ],
+      "defaults": { "controls/keyboard": "1" }
+    }
+  ],
+  "saves": ["{install}/files/game/mc0"],
+  "folders": {
+    "game": [{ "path": "{install}/files" }],
+    "saves": [{ "path": "{install}/files/game/mc0" }],
+    "logs": [{ "path": "{install}/files/logs" }]
+  },
+  "actions": [
+    { "id": "saves", "label": "Saves", "help": "Your memory card saves.", "open": "saves" },
+    { "id": "logs", "label": "Logs", "help": "The game's and the build's logs.", "open": "logs" }
+  ],
+  "exit_codes": { "2": "The game isn't built yet: set it up again on the game's page." },
+  "system": { "windows": { "version": "10" } }
+}
