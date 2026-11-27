@@ -78,7 +78,7 @@ publicada aqui.</sub>
 | Desempenho | ✅ 60 quadros por segundo na fase (GeForce GTX 1650, nitidez 8x) |
 | Widescreen 16:9 | ✅ Nas fases e no pause · 🔧 o HUD fica esticado |
 | Teclado | ✅ Funciona |
-| Controle | 🧪 Xbox (XInput) com vibração; PlayStation pelo Steam ou DS4Windows. Pouco testado com controle de verdade |
+| Controle | 🧪 Xbox (XInput) com vibração; PlayStation pelo Steam ou DS4Windows.|
 | Launcher | ✅ Português e inglês |
 | Instalação a partir do disco | ✅ Testada do zero em PCs diferentes, inclusive em pastas com espaço no nome |
 | Windows 10 / 11 | ✅ Funciona |
