@@ -14,7 +14,7 @@
     <AssemblyName>Ben 10 Recomp Launcher</AssemblyName>
     <RootNamespace>Ben10Launcher</RootNamespace>
     <Product>Ben 10 Recomp</Product>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
   </PropertyGroup>
 
   <ItemGroup>

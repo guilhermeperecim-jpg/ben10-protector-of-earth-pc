@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/PS2-SLUS--21661_v1.01-3c7d24?logo=playstation&logoColor=white" alt="PS2 SLUS-21661 v1.01">
   <img src="https://img.shields.io/badge/GPU-Vulkan-3c7d24?logo=vulkan&logoColor=white" alt="Vulkan">
-  <img src="https://img.shields.io/badge/vers%C3%A3o-0.1.0-3c7d24" alt="versão 0.1.0">
+  <img src="https://img.shields.io/badge/vers%C3%A3o-0.1.1-3c7d24" alt="versão 0.1.1">
   <img src="https://img.shields.io/badge/licen%C3%A7a-GPL--3.0-3c7d24" alt="GPL-3.0">
 </p>
 
@@ -49,8 +49,10 @@ Por [guilhermeperecim-jpg](https://github.com/guilhermeperecim-jpg)
 <sub>Telas do launcher, desenhadas pelo próprio programa. A arte é original do projeto; nenhuma imagem do jogo é
 publicada aqui.</sub>
 
-## Novidades (0.1.0)
+## Novidades
 
+- **0.1.1: funciona no [RecompLauncher](https://recomplauncher.com):** escolha a sua ISO lá, ele confere, monta o jogo
+  sem janela e abre direto no Play, com as configurações na página do jogo. O launcher deste projeto continua igual.
 - **Primeira versão pública:** launcher em português e inglês, com JOGAR, OPÇÕES, CONTROLES e ARQUIVOS DO JOGO.
 - **Acha a sua ISO sozinho:** na primeira abertura, procura nas pastas do usuário e nos discos e confere se é a versão
   certa. Se não achar, é só apontar o arquivo.
@@ -249,8 +251,9 @@ the graphics chip runs on your graphics card through Vulkan.
 
 <p align="center"><img src="docs/images/launcher-home-en.png" alt="The launcher" width="760"></p>
 
-## What's new (0.1.0)
+## What's new
 
+- **0.1.1: works with [RecompLauncher](https://recomplauncher.com):** pick your ISO there, it checks it, builds the game without a window and opens straight on Play, with the settings on the game's page. This project's launcher is unchanged.
 - **First public release:** a launcher in English and Portuguese, with PLAY, OPTIONS, CONTROLS and GAME FILES.
 - **Finds your ISO by itself** on the first launch, and checks that it is the right version.
 - **No Visual Studio install:** the launcher downloads only the parts of Microsoft's C++ compiler the build uses (about
