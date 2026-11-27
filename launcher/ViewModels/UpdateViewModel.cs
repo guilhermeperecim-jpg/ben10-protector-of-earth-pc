@@ -235,7 +235,8 @@ public partial class UpdateViewModel : ObservableObject
                 ShowNotes();
             return;
         }
-        if (!inSetup && CanUpdate && _checkOnOpen())
+        // started by RecompLauncher: it brings the new releases itself, and two updaters on one folder fight
+        if (!inSetup && CanUpdate && _checkOnOpen() && Environment.GetEnvironmentVariable("RECOMPLAUNCHER") != "1")
             await CheckAsync(quiet: true);
     }
 

@@ -41,6 +41,24 @@ internal static class Program
             Console.WriteLine("icon: " + args[2]);
             return;
         }
+        // RecompLauncher (recomplauncher.json): the first-launch setup without a window, and Play straight into the game
+        if (args.Length >= 1 && args[0] == "--prepare")
+        {
+            if (!args.Contains("--accept-vs-license"))
+            {
+                // the build downloads Microsoft's C++ tools: only the player accepts their license (RecompLauncher's tick)
+                Console.WriteLine("Building the game needs Microsoft's C++ tools: accept their license (--accept-vs-license).");
+                Environment.ExitCode = 4;
+                return;
+            }
+            Environment.ExitCode = Prepare(args.FirstOrDefault(a => a.StartsWith("--disc="))?["--disc=".Length..]);
+            return;
+        }
+        if (args.Length >= 1 && args[0] == "--play")
+        {
+            Environment.ExitCode = PlayAndWait();
+            return;
+        }
         // --update: open on the new version's notes (the game's update popup)
         ViewModels.UpdateViewModel.OpenOnUpdate = args.Contains("--update");
         ViewModels.UpdateViewModel.OpenOnRebuild = args.Contains("--rebuild");
@@ -49,6 +67,74 @@ internal static class Program
 
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().LogToTrace();
+
+    /// <summary>tools\setup_game.py as the first launch runs it, with its steps printed as RecompLauncher's
+    /// "progress &lt;0-1&gt; &lt;text&gt;" lines and the reason of a failure printed last. Only the portable C++ tools:
+    /// with no window, Microsoft's installer can't be offered.</summary>
+    private static int Prepare(string? disc)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        L.Use("auto");
+        var folder = GameFolder.Find();
+        if (FolderCheck.Problems(folder) is { Count: > 0 } problems)
+        {
+            Console.WriteLine($"{problems[0].Title}: {problems[0].Detail}");
+            return 3;
+        }
+        var start = folder.SetupStart(disc);
+        start.ArgumentList.Add("--portable-tools");
+        Directory.CreateDirectory(folder.LogsPath);
+        using var log = GameFolder.OpenRunLog(Path.Combine(folder.LogsPath, "setup.log"));
+        using var setup = System.Diagnostics.Process.Start(start)!;
+        var errors = setup.StandardError.ReadToEndAsync();
+        int step = 1, steps = 1;
+        string title = "", reason = "";
+        void Progress(double within) => Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"progress {Math.Clamp((step - 1 + within) / steps, 0, 1):0.###} {title}"));
+        while (setup.StandardOutput.ReadLine() is { } line)
+        {
+            log.WriteLine(line);
+            var parts = line.Split(' ', 4);
+            if (parts[0] == "[step]" && parts.Length == 4 && int.TryParse(parts[1], out step) && int.TryParse(parts[2], out steps))
+            {
+                title = parts[3];
+                Progress(0);
+            }
+            else if (parts[0] == "[progress]" && double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                         System.Globalization.CultureInfo.InvariantCulture, out var within))
+                Progress(within);
+            else if (line.StartsWith("[error] "))
+                reason = line[8..];
+            else if (line != "[done]")
+                Console.WriteLine(line);
+        }
+        setup.WaitForExit();
+        var stderr = errors.Result.TrimEnd();
+        if (stderr.Length > 0)
+        {
+            log.WriteLine(stderr);
+            Console.WriteLine(stderr);
+        }
+        if (setup.ExitCode != 0 && reason.Length > 0)
+            Console.WriteLine(reason); // last: the line a player reads
+        return setup.ExitCode;
+    }
+
+    /// <summary>The built game, started as the PLAY button does, waited for (RecompLauncher backs the saves up when it
+    /// closes) and its exit code passed on.</summary>
+    private static int PlayAndWait()
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        L.Use("auto");
+        var why = GameFolder.Find().Play(out var game);
+        if (why != null || game == null)
+        {
+            Console.WriteLine(why ?? L.T("The game isn't built yet."));
+            return 2;
+        }
+        game.WaitForExit();
+        return game.ExitCode;
+    }
 
     private static void Shot(string page, string outPath, string language, int width, int height)
     {
